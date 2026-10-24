@@ -7,6 +7,7 @@ import { CropEditor } from './lib/crop-editor.js';
 import { LivePlayer } from './lib/live-player.js';
 import { DanmakuClient } from './lib/danmaku.js';
 import { withTimeout } from './lib/async.js';
+import { LiveSession } from './lib/live-session.js';
 
 const $ = selector => document.querySelector(selector);
 const $$ = selector => [...document.querySelectorAll(selector)];
@@ -26,6 +27,7 @@ let cropEditor;
 const connectionEvents = [];
 let audioStarting = false;
 let observedAudioContext = null;
+const liveSession = new LiveSession({ onEvent: (stage, detail) => connectionEvent('live', stage, detail) });
 
 function connectionEvent(source, stage, detail) {
   connectionEvents.push({ time: new Date().toISOString(), source, stage, detail: String(detail).replace(/(?:https?|wss?):\/\/[^\s]+/g, '[直播地址]') });
@@ -35,7 +37,7 @@ function connectionEvent(source, stage, detail) {
 function showConnectionInfo() {
   const info = {
     version: extension ? chrome.runtime.getManifest().version : 'preview',
-    audio: mixer.context?.state || '未启动',
+    audio: mixer.context?.state || '未启动', transport: 'studio-fetch',
     sources: Object.fromEntries(CHANNELS.map(id => {
       const source = sources[id], video = source.video;
       return [id, { room: scene.sources[id].room, status: source.liveState, stage: source.liveText, pending: source.pending,
@@ -77,9 +79,9 @@ function toast(message, type = 'success') {
 }
 async function request(message) {
   if (!extension) throw new Error('请在 Edge 加载 extension 文件夹后使用直播间功能；当前页面可体验演示');
-  const timeout = message.type === 'LIVE_DANMAKU_SESSION' ? 45000 : message.type === 'LIVE_PLAY_INFO' ? 20000 : 10000;
-  const response = await withTimeout(chrome.runtime.sendMessage(message), timeout,
-    message.type === 'LIVE_PLAY_INFO' ? '获取直播流超时，请点击重新连接' : '扩展后台响应超时，请在扩展管理页重新加载后打开工作台');
+  if (liveSession.accepts(message)) return liveSession.request(message);
+  const response = await withTimeout(chrome.runtime.sendMessage(message), 10000,
+    '扩展后台响应超时，请在扩展管理页重新加载后打开工作台');
   if (!response?.ok) throw new Error(response?.error || '扩展后台连接已中断，请重新打开工作台');
   return response.data;
 }

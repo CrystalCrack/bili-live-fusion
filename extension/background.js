@@ -1,18 +1,11 @@
 import { openStudio } from './lib/launch.js';
 import { BilibiliApi } from './lib/bilibili-api.js';
-import { withTimeout } from './lib/async.js';
+import { ensureLiveNetwork } from './lib/live-network.js';
 
 const studioUrl = chrome.runtime.getURL('studio.html');
 const api = new BilibiliApi({ cookie: async name => (await chrome.cookies.get({ url: 'https://www.bilibili.com/', name }))?.value || null });
 // Only this extension's API, media and WebSocket requests receive these headers.
-const networkReady = withTimeout(chrome.declarativeNetRequest.updateDynamicRules({
-  removeRuleIds: [1001], addRules: [{ id: 1001, priority: 1, action: { type: 'modifyHeaders', requestHeaders: [
-    { header: 'Referer', operation: 'set', value: 'https://live.bilibili.com/' },
-    { header: 'Origin', operation: 'set', value: 'https://live.bilibili.com' }
-  ] }, condition: { initiatorDomains: [chrome.runtime.id],
-    requestDomains: ['bilibili.com', 'bilivideo.com', 'bilivideo.cn', 'biliapi.net'],
-    resourceTypes: ['xmlhttprequest', 'media', 'websocket'] } }]
-}), 5000, '直播网络规则启动超时，请重新加载扩展');
+const networkReady = ensureLiveNetwork();
 // Keep startup errors available for the first request without an unhandled
 // rejection when the worker starts before a studio is open.
 networkReady.catch(() => {});

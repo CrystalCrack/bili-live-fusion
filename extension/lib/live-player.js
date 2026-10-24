@@ -21,7 +21,8 @@ export class LivePlayer {
     } catch (error) {
       if (!this.running || generation !== this.generation) return;
       this.onState('error', error.message);
-      this.retry = setTimeout(() => this.load(generation), 10000);
+      // Keep a failed initial lookup visible. An automatic retry used to hide
+      // the timeout behind "connecting" again every ten seconds.
     }
   }
   clearEngine() {

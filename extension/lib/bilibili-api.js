@@ -1,17 +1,28 @@
 import { parseRoomId } from './model.js';
 import { parsePlayInfo } from './live-model.js';
 import { signWbi } from './wbi.js';
+import { withTimeout } from './async.js';
 
 export class BilibiliApi {
-  constructor({ fetcher = (url, options) => globalThis.fetch(url, options), cookie = async () => null, now = () => Date.now() } = {}) {
+  constructor({ fetcher = (url, options) => globalThis.fetch(url, options), cookie = async () => null, now = () => Date.now(), onRequest = () => {}, timeout = 15000 } = {}) {
     this.fetcher = fetcher; this.cookie = cookie; this.now = now; this.navigation = null; this.lastSend = new Map();
+    this.onRequest = onRequest; this.timeout = timeout;
   }
   async json(url, options = {}) {
-    let response;
-    try { response = await this.fetcher(url, { credentials: 'include', cache: 'no-store', signal: AbortSignal.timeout(15000), ...options }); }
-    catch (error) { throw new Error(error.name === 'TimeoutError' ? '直播服务响应超时，请稍后重连' : '无法连接 B 站直播服务，请检查网络后重连'); }
-    if (!response.ok) throw new Error(`直播服务连接失败（${response.status}），请稍后重连`);
-    try { return await response.json(); } catch { throw new Error('直播服务响应异常，请稍后重连'); }
+    const controller = new AbortController(), path = new URL(url).pathname, started = this.now();
+    this.onRequest('request', path);
+    try {
+      return await withTimeout((async () => {
+        let response;
+        try { response = await this.fetcher(url, { credentials: 'include', cache: 'no-store', ...options, signal: controller.signal }); }
+        catch { throw new Error('无法连接 B 站直播服务，请检查网络后重连'); }
+        this.onRequest('response', `${path} · HTTP ${response.status || (response.ok ? 200 : '错误')} · ${this.now() - started} ms`);
+        if (!response.ok) throw new Error(`直播服务连接失败（${response.status}），请稍后重连`);
+        try { return await response.json(); } catch { throw new Error('直播服务响应异常，请稍后重连'); }
+      })(), this.timeout, 'B 站直播接口响应超时，请检查网络后重连');
+    } catch (error) {
+      this.onRequest('error', `${path} · ${error.message}`); throw error;
+    } finally { controller.abort(); }
   }
   async nav(refresh = false) {
     if (!refresh && this.navigation && this.now() - this.navigation.time < 60000) return this.navigation.data;

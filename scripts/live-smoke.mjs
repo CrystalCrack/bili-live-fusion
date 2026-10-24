@@ -83,6 +83,12 @@ try {
   await page.goto(`chrome-extension://${extensionId}/studio.html`);
   await page.evaluate(() => {
     navigator.mediaDevices.getDisplayMedia = () => { throw new Error('Screen capture must not be called for direct live sources'); };
+    window.liveWorkerRequests = 0;
+    const send = chrome.runtime.sendMessage.bind(chrome.runtime);
+    chrome.runtime.sendMessage = message => {
+      if (message.type.startsWith('LIVE_')) { window.liveWorkerRequests++; return new Promise(() => {}); }
+      return send(message);
+    };
     window.testPlayers = new Map(); const attach = Hls.prototype.attachMedia;
     Hls.prototype.attachMedia = function(video) { window.testPlayers.set(video.id, this); return attach.call(this, video); };
   });
@@ -91,8 +97,9 @@ try {
   assert.equal(await page.locator('#source-count').textContent(), '2 / 2 已接入');
   assert.equal(context.pages().some(tab => tab.url().startsWith('https://live.bilibili.com/')), false);
   assert.equal(await page.evaluate(() => document.querySelector('#video-A').srcObject), null);
+  assert.equal(await page.evaluate(() => window.liveWorkerRequests), 0);
   await page.waitForFunction(() => document.querySelector('#db-A').textContent !== '−∞ dB');
-  console.log('PASS direct HLS playback and Web Audio mixing with no screen sharing or room tabs');
+  console.log('PASS direct HLS playback and Web Audio mixing while background live messaging is non-responsive');
   await page.waitForFunction(() => document.querySelector('#danmaku-feed').textContent.includes('房间 12345') && document.querySelector('#danmaku-feed').textContent.includes('房间 67890'));
   assert.ok(await page.locator('[data-danmaku-status="A"]').textContent().then(text => text.includes('已连接')));
   console.log('PASS direct WebSocket authentication and compressed room danmaku reach both sources');
@@ -189,31 +196,42 @@ try {
   assert.equal(requests.filter(url => url.pathname.endsWith('getRoomPlayInfo')).length, beforeAudioRecovery);
   console.log('PASS blocked autoplay exposes continue action and resumes the existing decoder');
 
-  // A non-responding extension worker must not hold the source controls forever.
+  // A network request that ignores AbortSignal must still terminate in the
+  // foreground, retain its error and permit an immediate explicit retry.
   await page.locator('[data-disconnect="A"]').click();
   await page.evaluate(() => {
-    const send = chrome.runtime.sendMessage.bind(chrome.runtime);
-    chrome.runtime.sendMessage = message => message.type === 'LIVE_PLAY_INFO' ? new Promise(() => {}) : send(message);
+    const fetch = window.fetch.bind(window); window.stallLiveHttp = true;
+    window.fetch = (url, options) => String(url).includes('getRoomPlayInfo') && window.stallLiveHttp ? new Promise(() => {}) : fetch(url, options);
   });
   await page.locator('[data-connect="A"]').click();
   assert.match(await page.locator('[data-source-title="A"]').textContent(), /获取直播流/);
   assert.equal(await page.locator('[data-disconnect="A"]').isEnabled(), true);
-  await page.waitForFunction(() => document.querySelector('[data-status="A"]').textContent === '连接失败', null, { timeout: 23000 });
+  await page.waitForFunction(() => document.querySelector('[data-status="A"]').textContent === '连接失败', null, { timeout: 18000 });
   assert.equal(await page.locator('[data-connect="A"]').isEnabled(), true);
   assert.match(await page.locator('[data-source-title="A"]').textContent(), /超时/);
   await page.locator('#connection-button').click();
   diagnostic = JSON.parse(await page.locator('#connection-info').textContent());
   assert.equal(diagnostic.sources.A.pending, false);
+  assert.equal(diagnostic.transport, 'studio-fetch');
+  assert.ok(diagnostic.events.some(event => event.stage === 'http:request'));
   assert.ok(diagnostic.events.some(event => event.stage === 'error' && /超时/.test(event.detail)));
+  await page.waitForTimeout(11000);
+  assert.equal(await page.locator('[data-status="A"]').textContent(), '连接失败');
   await page.screenshot({ path: path.join(artifacts, 'connection-timeout-regression.png'), fullPage: true });
   await page.locator('#connection-dialog .close-dialog').click();
   await page.locator('[data-disconnect="A"]').click();
-  console.log('PASS a non-responding worker yields a specific timeout and restores connection controls');
+  console.log('PASS a stalled HTTP request yields a specific timeout and records the exact network stage');
   await page.locator('[data-connect="A"]').click(); await page.locator('[data-disconnect="A"]').click();
   assert.equal(await page.locator('[data-status="A"]').textContent(), '未连接');
   assert.equal(await page.locator('[data-connect="A"]').isEnabled(), true);
+  await page.evaluate(() => { window.stallLiveHttp = false; }); epoch = Date.now() - 12000;
+  await page.locator('[data-connect="A"]').click();
+  await page.waitForFunction(() => document.querySelector('[data-status="A"]').textContent === '直播中');
   assert.deepEqual(errors, []);
-  console.log(JSON.stringify({ passed: 13, errors, playRequests: requests.filter(url => url.pathname.endsWith('getRoomPlayInfo')).length }, null, 2));
+  await page.locator('[data-disconnect="A"]').click();
+  assert.deepEqual(errors, []);
+  console.log('PASS explicit retry recovers HTTP playback after failure and cancellation');
+  console.log(JSON.stringify({ passed: 14, errors, playRequests: requests.filter(url => url.pathname.endsWith('getRoomPlayInfo')).length }, null, 2));
 } catch (error) {
   if (page) { console.error(await page.evaluate(() => ({ toasts: document.querySelector('#toast-region')?.textContent,
     sources: [...document.querySelectorAll('[data-source-title]')].map(el => el.textContent), danmaku: [...document.querySelectorAll('[data-danmaku-status]')].map(el => el.textContent),
