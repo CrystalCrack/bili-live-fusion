@@ -11,7 +11,7 @@ const profile = fs.mkdtempSync(path.join(artifacts, 'edge-extension-'));
 const context = await chromium.launchPersistentContext(profile, {
   executablePath: process.env.EDGE_PATH || 'C:\\Program Files (x86)\\Microsoft\\Edge\\Application\\msedge.exe',
   headless: true, viewport: { width: 1440, height: 1000 },
-  args: [`--disable-extensions-except=${extension}`, `--load-extension=${extension}`, '--autoplay-policy=no-user-gesture-required'],
+  args: [`--disable-extensions-except=${extension}`, `--load-extension=${extension}`],
   ignoreDefaultArgs: ['--disable-extensions']
 });
 const errors = [];

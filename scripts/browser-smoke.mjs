@@ -8,7 +8,7 @@ const { chromium } = process.env.PLAYWRIGHT_PATH ? require(process.env.PLAYWRIGH
 const root = fileURLToPath(new URL('../', import.meta.url));
 const artifacts = path.join(root, 'artifacts'); fs.mkdirSync(artifacts, { recursive: true });
 const executablePath = process.env.EDGE_PATH || 'C:\\Program Files (x86)\\Microsoft\\Edge\\Application\\msedge.exe';
-const browser = await chromium.launch({ executablePath, headless: true, args: ['--autoplay-policy=no-user-gesture-required'] });
+const browser = await chromium.launch({ executablePath, headless: true });
 const context = await browser.newContext({ viewport: { width: 1600, height: 1180 }, acceptDownloads: true });
 const page = await context.newPage();
 const errors = [], results = [];

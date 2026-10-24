@@ -1,4 +1,5 @@
 import { CHANNELS, clamp } from './model.js';
+import { withTimeout } from './async.js';
 
 export class AudioMixer {
   constructor() {
@@ -6,7 +7,7 @@ export class AudioMixer {
     this.destination = null; this.monitor = null; this.limiter = null;
     this.elements = new WeakMap();
   }
-  async init() {
+  prepare() {
     if (!this.context) {
       this.context = new AudioContext({ latencyHint: 'interactive' });
       this.master = this.context.createGain();
@@ -20,17 +21,27 @@ export class AudioMixer {
       this.limiter.connect(this.destination); this.limiter.connect(this.monitor);
       this.monitor.connect(this.context.destination);
     }
-    if (this.context.state === 'suspended') await this.context.resume();
     return this.context;
   }
+  async init() {
+    const context = this.prepare();
+    if (context.state !== 'running') {
+      if (!this.activation) {
+        this.activation = withTimeout(context.resume(), 3000, '声音启动超时，请点击“启用声音”重试')
+          .finally(() => { this.activation = null; });
+      }
+      await this.activation;
+    }
+    return context;
+  }
   async attach(id, stream) {
-    await this.init(); this.detach(id);
+    this.prepare(); this.detach(id);
     if (!stream.getAudioTracks().length) return false;
     const source = this.context.createMediaStreamSource(new MediaStream(stream.getAudioTracks()));
     return this.install(id, source);
   }
-  async attachElement(id, video) {
-    await this.init(); this.detach(id);
+  attachElement(id, video) {
+    this.prepare(); this.detach(id);
     let source = this.elements.get(video);
     if (!source) { source = this.context.createMediaElementSource(video); this.elements.set(video, source); }
     // The media element's decoded A/V clock remains authoritative. Seeking or

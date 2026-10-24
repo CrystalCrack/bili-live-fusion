@@ -6,6 +6,7 @@ import { OutputServer } from './lib/output-channel.js';
 import { CropEditor } from './lib/crop-editor.js';
 import { LivePlayer } from './lib/live-player.js';
 import { DanmakuClient } from './lib/danmaku.js';
+import { withTimeout } from './lib/async.js';
 
 const $ = selector => document.querySelector(selector);
 const $$ = selector => [...document.querySelectorAll(selector)];
@@ -22,6 +23,52 @@ const mixer = new AudioMixer();
 const compositor = new Compositor($('#composite'), () => scene, () => sources);
 let filter = new DanmakuFilter();
 let cropEditor;
+const connectionEvents = [];
+let audioStarting = false;
+let observedAudioContext = null;
+
+function connectionEvent(source, stage, detail) {
+  connectionEvents.push({ time: new Date().toISOString(), source, stage, detail: String(detail).replace(/(?:https?|wss?):\/\/[^\s]+/g, '[直播地址]') });
+  if (connectionEvents.length > 50) connectionEvents.shift();
+  if ($('#connection-dialog').open) showConnectionInfo();
+}
+function showConnectionInfo() {
+  const info = {
+    version: extension ? chrome.runtime.getManifest().version : 'preview',
+    audio: mixer.context?.state || '未启动',
+    sources: Object.fromEntries(CHANNELS.map(id => {
+      const source = sources[id], video = source.video;
+      return [id, { room: scene.sources[id].room, status: source.liveState, stage: source.liveText, pending: source.pending,
+        quality: scene.sources[id].quality, danmaku: source.dmText, messages: source.received,
+        video: { width: video.videoWidth, height: video.videoHeight, time: Number(video.currentTime.toFixed(2)),
+          paused: video.paused, ready: video.readyState, network: video.networkState, error: video.error?.code || null,
+          buffered: Array.from({ length: video.buffered.length }, (_, i) => [video.buffered.start(i), video.buffered.end(i)]) } }];
+    })),
+    events: connectionEvents
+  };
+  $('#connection-info').textContent = JSON.stringify(info, null, 2);
+}
+function updateAudioState() {
+  const state = mixer.context?.state;
+  $('#enable-audio').hidden = !state || state === 'running';
+  $('#enable-audio').disabled = audioStarting;
+  $('#audio-state').textContent = !state ? '连接直播源后启动声音' : state === 'running' ? '声音已就绪' : audioStarting ? '正在启动声音…' : '点击“启用声音”启动混音';
+}
+function activateAudio() {
+  if (audioStarting) return;
+  audioStarting = true;
+  const activation = mixer.init();
+  if (mixer.context && mixer.context !== observedAudioContext) {
+    observedAudioContext = mixer.context;
+    observedAudioContext.addEventListener('statechange', updateAudioState);
+  }
+  updateAudioState();
+  activation.then(() => {
+    mixer.update(scene); connectionEvent('audio', 'ready', mixer.context.state);
+  }, error => {
+    connectionEvent('audio', 'waiting', error.message); toast(error.message, 'warning');
+  }).finally(() => { audioStarting = false; updateAudioState(); });
+}
 
 function toast(message, type = 'success') {
   const el = document.createElement('div'); el.className = `toast ${type}`; el.textContent = message;
@@ -30,8 +77,10 @@ function toast(message, type = 'success') {
 }
 async function request(message) {
   if (!extension) throw new Error('请在 Edge 加载 extension 文件夹后使用直播间功能；当前页面可体验演示');
-  const response = await chrome.runtime.sendMessage(message);
-  if (!response?.ok) throw new Error(response?.error || '直播间连接中断，请刷新直播间后重试');
+  const timeout = message.type === 'LIVE_DANMAKU_SESSION' ? 45000 : message.type === 'LIVE_PLAY_INFO' ? 20000 : 10000;
+  const response = await withTimeout(chrome.runtime.sendMessage(message), timeout,
+    message.type === 'LIVE_PLAY_INFO' ? '获取直播流超时，请点击重新连接' : '扩展后台响应超时，请在扩展管理页重新加载后打开工作台');
+  if (!response?.ok) throw new Error(response?.error || '扩展后台连接已中断，请重新打开工作台');
   return response.data;
 }
 async function roomCommand(id, command) {
@@ -91,12 +140,12 @@ function updateConnected() {
   for (const id of CHANNELS) {
     const source = sources[id], stream = source.stream, connected = sourceActive(source);
     if (connected) count++; if (source.demo) demo = true;
-    const status = $(`[data-status="${id}"]`); status.textContent = source.pending ? '连接中' : source.demo ? '演示中' : source.player ? ({ playing: '直播中', buffering: '缓冲中', connecting: '连接中', reconnecting: '重连中', error: '连接失败' }[source.liveState] || '连接中') : connected ? '标签页输入' : '未连接';
-    status.classList.toggle('connected', connected); status.classList.toggle('warning', Boolean(source.pending));
+    const status = $(`[data-status="${id}"]`); status.textContent = source.pending ? '连接中' : source.demo ? '演示中' : source.liveState ? ({ playing: '直播中', buffering: '缓冲中', connecting: '连接中', reconnecting: '重连中', blocked: '等待播放', error: '连接失败' }[source.liveState] || '连接中') : connected ? '标签页输入' : '未连接';
+    status.classList.toggle('connected', connected && !['blocked', 'error'].includes(source.liveState)); status.classList.toggle('warning', Boolean(source.pending || ['blocked', 'error', 'reconnecting'].includes(source.liveState)));
     $(`[data-thumbnail="${id}"]`).classList.toggle('connected', connected);
-    const connect = $(`[data-connect="${id}"]`); connect.disabled = source.pending; connect.querySelector('span').textContent = source.player ? `重新连接 ${id}` : `连接直播间 ${id}`;
-    $(`[data-disconnect="${id}"]`).disabled = !stream && !source.player;
-    $(`[data-source-title="${id}"]`).textContent = source.demo ? '演示画面 · 合成音频' : source.player ? source.liveText : connected ? `${stream.getAudioTracks().some(track => track.readyState === 'live') ? '音频已接入' : '仅画面'} · 标签页` : '直连画面 · 音频 · 弹幕';
+    const connect = $(`[data-connect="${id}"]`); connect.disabled = source.pending; connect.querySelector('span').textContent = source.player?.blocked ? `继续播放 ${id}` : source.player ? `重新连接 ${id}` : `连接直播间 ${id}`;
+    $(`[data-disconnect="${id}"]`).disabled = !stream && !source.player && !source.pending;
+    $(`[data-source-title="${id}"]`).textContent = source.demo ? '演示画面 · 合成音频' : source.liveText ? source.liveText : connected ? `${stream.getAudioTracks().some(track => track.readyState === 'live') ? '音频已接入' : '仅画面'} · 标签页` : '直连画面 · 音频 · 弹幕';
     $(`[data-source-title="${id}"]`).title = source.roomId ? `直播间 ${source.roomId} · ${source.liveText}` : source.liveText;
     const dm = $(`[data-danmaku-status="${id}"]`);
     dm.textContent = source.demo ? '演示弹幕' : source.dmText ? `${source.dmText}${source.received ? ` · ${source.received} 条` : ''}` : '弹幕等待连接';
@@ -195,7 +244,7 @@ function connectDanmaku(id) {
       if (source.chat !== client) return; source.received++; acceptDanmaku({ ...item, source: id });
       if (!source.chatStatsTimer) source.chatStatsTimer = setTimeout(() => { source.chatStatsTimer = null; if (source.chat === client) updateConnected(); }, 250);
     },
-    onState(state, text) { if (source.chat !== client) return; source.dmState = state; source.dmText = text; updateConnected(); }
+    onState(state, text) { if (source.chat !== client) return; source.dmState = state; source.dmText = text; connectionEvent(id, `danmaku:${state}`, text); updateConnected(); }
   });
   source.chat = client; client.start();
 }
@@ -204,18 +253,25 @@ async function connectLive(id) {
   if (source.pending || demoPending) return;
   const roomId = parseRoomId($(`#room-${id}`).value);
   if (!roomId) { toast('请输入房间号或完整直播间链接，再点击连接', 'error'); return; }
+  if (source.player?.blocked && roomId === scene.sources[id].room && source.player.info?.streams[0]?.quality === scene.sources[id].quality) {
+    activateAudio(); source.player.resume(); return;
+  }
   disconnectSource(id, false); const operation = source.operation;
   source.pending = true; scene.sources[id].room = roomId; $(`#room-${id}`).value = roomId; saveScene(); updateConnected();
+  connectionEvent(id, 'start', `房间 ${roomId}`);
   try {
-    await mixer.attachElement(id, source.video);
-    if (source.operation !== operation) return;
+    // Build the audio graph synchronously in the click gesture, but never gate
+    // room lookup, video decoding or danmaku on the browser's resume promise.
+    try { mixer.attachElement(id, source.video); }
+    catch (error) { source.video.muted = true; connectionEvent('audio', 'error', error.message); toast(`声音接入失败：${error.message}`, 'warning'); }
+    activateAudio();
     mixer.update(scene);
     const player = new LivePlayer(source.video, {
       resolve: (roomId, quality) => request({ type: 'LIVE_PLAY_INFO', roomId, quality }),
       getLatency: () => scene.sync.latency + scene.sources[id].syncDelay / 1000,
       onState(state, text) {
         if (source.player !== player) return;
-        source.liveState = state; source.liveText = text; updateConnected();
+        source.liveState = state; source.liveText = text; connectionEvent(id, state, text); updateConnected();
       },
       onInfo(info) {
         if (source.player !== player) return;
@@ -237,11 +293,12 @@ async function connectLive(id) {
     });
     source.player = player; await player.start(roomId, scene.sources[id].quality);
     if (source.operation === operation) selectSource(id);
-  } catch (error) { if (source.operation === operation) { source.liveText = error.message; toast(error.message, 'error'); } }
+  } catch (error) { if (source.operation === operation) { source.liveState = 'error'; source.liveText = error.message; connectionEvent(id, 'error', error.message); toast(error.message, 'error'); } }
   finally { if (source.operation === operation) source.pending = false; updateConnected(); }
 }
 function disconnectSource(id, notify = true) {
   const source = sources[id], stream = source.stream;
+  if (source.pending || source.player || source.stream) connectionEvent(id, 'stop', '已断开直播源');
   source.operation++; source.pending = false;
   clearTimeout(source.chatStatsTimer); source.chatStatsTimer = null;
   source.player?.stop(); source.player = null; source.chat?.stop(); source.chat = null; source.roomId = null;
@@ -573,7 +630,8 @@ function bindEvents() {
   $$('#audio-mode button').forEach(button => button.addEventListener('click', () => { scene.audio.mode = button.dataset.mode; segmented('#audio-mode', scene.audio.mode); changed(); }));
   $$('#danmaku-mode button').forEach(button => button.addEventListener('click', () => { scene.danmaku.mode = button.dataset.mode; clearDanmaku(); segmented('#danmaku-mode', scene.danmaku.mode); changed(); }));
   $('#master-volume').addEventListener('input', event => { scene.audio.master = Number(event.target.value); $('#master-value').textContent = `${scene.audio.master}%`; changed(); });
-  $('#monitor-toggle').addEventListener('change', async event => { scene.audio.monitor = event.target.checked; try { if (scene.audio.monitor) await mixer.init(); changed(); } catch (error) { toast(error.message, 'error'); } });
+  $('#monitor-toggle').addEventListener('change', event => { scene.audio.monitor = event.target.checked; if (scene.audio.monitor) activateAudio(); changed(); });
+  $('#enable-audio').addEventListener('click', activateAudio);
   $('#danmaku-toggle').addEventListener('change', event => { scene.danmaku.show = event.target.checked; compositor.clearDanmaku(); changed(); });
   $('#filter-button').addEventListener('click', openFilter); $('#apply-filter').addEventListener('click', applyFilter); $('#clear-danmaku').addEventListener('click', () => { clearDanmaku(); toast('弹幕记录与画布已清空'); });
   for (const key of ['size', 'opacity', 'speed', 'area']) $(`#dm-${key}`).addEventListener('input', event => { $(`#dm-${key}-value`).textContent = `${event.target.value}${key === 'size' ? ' px' : key === 'speed' ? ' s' : '%'}`; });
@@ -593,6 +651,13 @@ function bindEvents() {
   $('#crop-full').addEventListener('click', () => cropEditor.reset());
   $('#crop-apply').addEventListener('click', () => cropEditor.apply());
   for (const selector of ['#help-button', '#rail-help', '#footer-help']) $(selector).addEventListener('click', () => $('#help-dialog').showModal());
+  $('#connection-button').addEventListener('click', () => { showConnectionInfo(); $('#connection-dialog').showModal(); });
+  $('#refresh-connection-info').addEventListener('click', showConnectionInfo);
+  $('#copy-connection-info').addEventListener('click', async () => {
+    showConnectionInfo();
+    try { await navigator.clipboard.writeText($('#connection-info').textContent); toast('连接信息已复制'); }
+    catch { toast('请在连接信息中选中文字复制', 'warning'); }
+  });
   $('#scene-button').addEventListener('click', () => $('#scene-dialog').showModal());
   $('#settings-button').addEventListener('click', () => { $('#output-settings').scrollIntoView({ behavior: 'smooth', block: 'center' }); $('#resolution').focus({ preventScroll: true }); });
   $('#scene-name').addEventListener('input', event => { scene.name = event.target.value.slice(0, 60) || '未命名场景'; saveScene(); });
@@ -634,7 +699,7 @@ async function init() {
   cropEditor = new CropEditor({ dialog: $('#crop-dialog'), stage: $('#crop-stage'), box: $('#crop-box'), video: $('#crop-video'), label: $('#crop-dimensions'),
     onApply(id, crop) { scene.sources[id].crop = crop; scene.selected = id; updateInspector(); changed(); toast(`直播间 ${id} 裁剪已应用到实时画布`); }
   });
-  buildAudioTracks(); bindTransform(); bindEvents(); syncScene(); restoring = false; compositor.start();
+  buildAudioTracks(); bindTransform(); bindEvents(); syncScene(); updateAudioState(); restoring = false; compositor.start();
   meterTimer = setInterval(() => {
     for (const id of CHANNELS) {
       const { percent, db } = mixer.level(id);

@@ -8,10 +8,11 @@ export class LivePlayer {
   async start(room, quality) {
     this.stop(); this.room = room; this.quality = quality; this.running = true;
     const generation = this.generation;
-    this.onState('connecting', '正在获取直播流');
     await this.load(generation);
   }
   async load(generation) {
+    if (!this.running || generation !== this.generation) return;
+    this.onState('connecting', '正在获取直播流');
     try {
       const info = await this.resolve(this.room, this.quality);
       if (!this.running || generation !== this.generation) return;
@@ -24,14 +25,16 @@ export class LivePlayer {
     }
   }
   clearEngine() {
+    this.engineGeneration = (this.engineGeneration || 0) + 1;
     clearInterval(this.syncTimer); clearTimeout(this.startTimer);
     if (this.hls) { this.hls.destroy(); this.hls = null; }
     if (this.flv) { this.flv.destroy(); this.flv = null; }
     this.video.pause(); this.video.removeAttribute('src'); this.video.load();
-    this.connected = false; this.syncReady = false;
+    this.connected = false; this.syncReady = false; this.blocked = false; this.playPending = null;
     this.lastEdge = null; this.edgeTime = null;
   }
   async open(candidate, generation) {
+    if (!this.running || generation !== this.generation) return;
     this.clearEngine(); this.onState('buffering', '正在缓冲直播流');
     let failed = false;
     const fail = error => {
@@ -45,10 +48,15 @@ export class LivePlayer {
       if (failed || !this.running || generation !== this.generation) return;
       if (this.connected) return;
       clearTimeout(this.startTimer); this.connected = true;
-      this.onState('playing', `直播已连接 · ${candidate.type.toUpperCase()}`);
+      this.onState('buffering', '直播画面已解码，正在对齐');
+      this.startTimer = setTimeout(() => fail(new Error('直播播放响应超时，正在切换线路')), (this.getLatency() + 20) * 1000);
       this.syncTimer = setInterval(() => this.synchronize(), 500); this.synchronize(true);
     };
     this.video.onloadedmetadata = ready;
+    this.video.onplaying = () => {
+      if (failed || !this.running || generation !== this.generation) return;
+      clearTimeout(this.startTimer); this.onState('playing', `直播已连接 · ${candidate.type.toUpperCase()}`);
+    };
     this.video.onerror = () => fail(new Error('直播解码中断，正在切换线路'));
     this.video.onended = () => fail(new Error('直播流已结束，正在更新房间状态'));
     this.recover = fail;
@@ -84,11 +92,23 @@ export class LivePlayer {
     if (force || !this.syncReady || Math.abs(drift) > 0.65) video.currentTime = target.time;
     video.playbackRate = Math.abs(drift) > 0.12 && Math.abs(drift) <= 0.65 ? (drift > 0 ? 1.02 : 0.98) : 1;
     this.syncReady = true;
-    if (video.paused) video.play().catch(error => this.onState('error', `请点击连接继续播放：${error.message}`));
+    if (video.paused && !this.blocked) this.resume();
     this.onSync({ ...target, latency, drift });
+  }
+  resume() {
+    if (!this.running || this.playPending) return;
+    const generation = this.generation, engine = this.engineGeneration;
+    this.blocked = false;
+    this.playPending = this.video.play().catch(error => {
+      if (!this.running || generation !== this.generation || engine !== this.engineGeneration || error.name === 'AbortError') return;
+      if (error.name === 'NotAllowedError') {
+        this.blocked = true; clearTimeout(this.startTimer);
+        this.onState('blocked', '请点击“继续播放”启动直播');
+      } else this.recover?.(new Error('直播播放中断，正在重连'));
+    }).finally(() => { if (generation === this.generation && engine === this.engineGeneration) this.playPending = null; });
   }
   stop() {
     this.running = false; this.generation++; clearTimeout(this.retry);
-    this.video.onloadedmetadata = null; this.video.onerror = null; this.video.onended = null; this.recover = null; this.clearEngine();
+    this.video.onloadedmetadata = null; this.video.onplaying = null; this.video.onerror = null; this.video.onended = null; this.recover = null; this.clearEngine();
   }
 }

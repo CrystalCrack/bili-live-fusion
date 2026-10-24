@@ -26,11 +26,11 @@ if (!fs.existsSync(flvFile)) execFileSync(process.env.FFMPEG_PATH || 'ffmpeg', [
 const profile = fs.mkdtempSync(path.join(artifacts, 'edge-live-'));
 const context = await chromium.launchPersistentContext(profile, {
   executablePath: process.env.EDGE_PATH || 'C:\\Program Files (x86)\\Microsoft\\Edge\\Application\\msedge.exe', headless: true,
-  viewport: { width: 1600, height: 1180 }, args: [`--disable-extensions-except=${extension}`, `--load-extension=${extension}`, '--autoplay-policy=no-user-gesture-required'],
+  viewport: { width: 1600, height: 1180 }, args: [`--disable-extensions-except=${extension}`, `--load-extension=${extension}`],
   ignoreDefaultArgs: ['--disable-extensions']
 });
 const errors = [], requests = [], sockets = new Map(); let worker, page;
-const epoch = Date.now() - 12000;
+let epoch = Date.now() - 12000;
 try {
   await context.route('https://api.bilibili.com/**', async route => {
     const url = new URL(route.request().url());
@@ -135,8 +135,85 @@ try {
   console.log('PASS HTTP-FLV direct decoder, live timeline and mixed audio');
   await page.screenshot({ path: path.join(artifacts, 'direct-live-integration.png'), fullPage: true });
   await page.locator('[data-disconnect="A"]').click(); await page.locator('[data-disconnect="B"]').click();
-  assert.equal(await page.locator('#source-count').textContent(), '0 / 2 已接入'); assert.deepEqual(errors, []);
-  console.log(JSON.stringify({ passed: 9, errors, playRequests: requests.filter(url => url.pathname.endsWith('getRoomPlayInfo')).length }, null, 2));
+  assert.equal(await page.locator('#source-count').textContent(), '0 / 2 已接入');
+
+  // Reproduce the old connection gate with a browser-owned resume promise that
+  // never settles. Video and chat must still start, then audio can be activated
+  // in a fresh user gesture without connecting the room again.
+  epoch = Date.now() - 12000;
+  await page.reload();
+  await page.evaluate(() => {
+    const NativeContext = window.AudioContext; window.hangAudio = true;
+    window.AudioContext = class extends NativeContext {
+      constructor(...args) { super(...args); NativeContext.prototype.suspend.call(this); }
+      get state() { return window.hangAudio ? 'suspended' : super.state; }
+      resume() { return window.hangAudio ? new Promise(() => {}) : super.resume(); }
+    };
+  });
+  await page.locator('#room-A').fill('12345'); await page.locator('[data-connect="A"]').click();
+  await page.waitForFunction(() => { const v = document.querySelector('#video-A'); return v.currentTime > 0 && !v.paused; });
+  await page.locator('#enable-audio').waitFor({ state: 'visible' });
+  await page.waitForFunction(() => !document.querySelector('#enable-audio').disabled);
+  assert.match(await page.locator('[data-danmaku-status="A"]').textContent(), /已连接/);
+  assert.equal(await page.locator('[data-connect="A"]').isEnabled(), true);
+  assert.match(await page.locator('#audio-state').textContent(), /启用声音/);
+  await page.locator('#connection-button').click();
+  let diagnostic = JSON.parse(await page.locator('#connection-info').textContent());
+  assert.equal(diagnostic.audio, 'suspended'); assert.equal(diagnostic.sources.A.pending, false);
+  assert.ok(diagnostic.events.some(event => event.stage === 'waiting'));
+  assert.equal(/fixture-token|csrf|w_rid|bilivideo/.test(JSON.stringify(diagnostic)), false);
+  await page.screenshot({ path: path.join(artifacts, 'audio-wait-regression.png'), fullPage: true });
+  await page.locator('#connection-dialog .close-dialog').click();
+  await page.evaluate(() => { window.hangAudio = false; });
+  const beforeAudioRecovery = requests.filter(url => url.pathname.endsWith('getRoomPlayInfo')).length;
+  await page.locator('#enable-audio').click();
+  await page.waitForFunction(() => document.querySelector('#audio-state').textContent === '声音已就绪' && document.querySelector('#db-A').textContent !== '−∞ dB');
+  assert.equal(requests.filter(url => url.pathname.endsWith('getRoomPlayInfo')).length, beforeAudioRecovery);
+  console.log('PASS stalled audio activation leaves video and danmaku live; one click restores mixing without a room reconnect');
+
+  // Default browser policy is active. Force a NotAllowedError to check the
+  // visible recovery path without reloading or losing the decoded live source.
+  await page.evaluate(() => {
+    const play = HTMLMediaElement.prototype.play; window.blockVideoPlay = true;
+    HTMLMediaElement.prototype.play = function() {
+      if (this.id === 'video-A' && window.blockVideoPlay) return Promise.reject(new DOMException('Gesture required', 'NotAllowedError'));
+      return play.call(this);
+    };
+    document.querySelector('#video-A').pause();
+  });
+  await page.waitForFunction(() => document.querySelector('[data-connect="A"]').textContent.includes('继续播放'));
+  assert.match(await page.locator('[data-status="A"]').textContent(), /等待播放/);
+  await page.evaluate(() => { window.blockVideoPlay = false; });
+  await page.locator('[data-connect="A"]').click();
+  await page.waitForFunction(() => !document.querySelector('#video-A').paused && document.querySelector('[data-status="A"]').textContent === '直播中');
+  assert.equal(requests.filter(url => url.pathname.endsWith('getRoomPlayInfo')).length, beforeAudioRecovery);
+  console.log('PASS blocked autoplay exposes continue action and resumes the existing decoder');
+
+  // A non-responding extension worker must not hold the source controls forever.
+  await page.locator('[data-disconnect="A"]').click();
+  await page.evaluate(() => {
+    const send = chrome.runtime.sendMessage.bind(chrome.runtime);
+    chrome.runtime.sendMessage = message => message.type === 'LIVE_PLAY_INFO' ? new Promise(() => {}) : send(message);
+  });
+  await page.locator('[data-connect="A"]').click();
+  assert.match(await page.locator('[data-source-title="A"]').textContent(), /获取直播流/);
+  assert.equal(await page.locator('[data-disconnect="A"]').isEnabled(), true);
+  await page.waitForFunction(() => document.querySelector('[data-status="A"]').textContent === '连接失败', null, { timeout: 23000 });
+  assert.equal(await page.locator('[data-connect="A"]').isEnabled(), true);
+  assert.match(await page.locator('[data-source-title="A"]').textContent(), /超时/);
+  await page.locator('#connection-button').click();
+  diagnostic = JSON.parse(await page.locator('#connection-info').textContent());
+  assert.equal(diagnostic.sources.A.pending, false);
+  assert.ok(diagnostic.events.some(event => event.stage === 'error' && /超时/.test(event.detail)));
+  await page.screenshot({ path: path.join(artifacts, 'connection-timeout-regression.png'), fullPage: true });
+  await page.locator('#connection-dialog .close-dialog').click();
+  await page.locator('[data-disconnect="A"]').click();
+  console.log('PASS a non-responding worker yields a specific timeout and restores connection controls');
+  await page.locator('[data-connect="A"]').click(); await page.locator('[data-disconnect="A"]').click();
+  assert.equal(await page.locator('[data-status="A"]').textContent(), '未连接');
+  assert.equal(await page.locator('[data-connect="A"]').isEnabled(), true);
+  assert.deepEqual(errors, []);
+  console.log(JSON.stringify({ passed: 13, errors, playRequests: requests.filter(url => url.pathname.endsWith('getRoomPlayInfo')).length }, null, 2));
 } catch (error) {
   if (page) { console.error(await page.evaluate(() => ({ toasts: document.querySelector('#toast-region')?.textContent,
     sources: [...document.querySelectorAll('[data-source-title]')].map(el => el.textContent), danmaku: [...document.querySelectorAll('[data-danmaku-status]')].map(el => el.textContent),
