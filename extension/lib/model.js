@@ -27,9 +27,9 @@ export function defaultScene() {
     sources: Object.fromEntries(CHANNELS.map((id, index) => [id, {
       room: '', visible: true, x: index * 50, y: 0, w: 50, h: 100,
       crop: { x: 0, y: 0, w: 100, h: 100 }, fit: 'contain', opacity: 100,
-      volume: 80, muted: false, pan: 0, voice: false, delay: 0
+      volume: 80, muted: false, pan: 0, voice: false, delay: 0, quality: 10000, syncDelay: 0
     }])),
-    layers: ['A', 'B'], audio: { mode: 'both', master: 80, monitor: true },
+    layers: ['A', 'B'], audio: { mode: 'both', master: 80, monitor: true }, sync: { latency: 4 },
     danmaku: { mode: 'both', show: true, opacity: 85, size: 30, speed: 10, area: 50,
       keywords: '', regex: '', blockedUsers: '', dedupe: true, maxPerSecond: 5,
       showUser: false, showSource: true }
@@ -66,6 +66,8 @@ function sourceSettings(raw, fallback) {
   result.volume = clamp(number(raw?.volume, fallback.volume), 0, 150);
   result.pan = clamp(number(raw?.pan, fallback.pan), -100, 100);
   result.delay = clamp(number(raw?.delay, fallback.delay), 0, 2000);
+  result.quality = Math.round(clamp(number(raw?.quality, fallback.quality), 1, 100000));
+  result.syncDelay = clamp(number(raw?.syncDelay, 0), 0, 20000);
   return result;
 }
 
@@ -87,6 +89,7 @@ export function sanitizeScene(raw) {
   if (Array.isArray(raw.layers) && raw.layers.length === 2 && new Set(raw.layers).size === 2 && raw.layers.every(id => CHANNELS.includes(id))) result.layers = [...raw.layers];
   for (const id of CHANNELS) result.sources[id] = sourceSettings(raw.sources?.[id], result.sources[id]);
   const a = raw.audio || {};
+  result.sync.latency = clamp(number(raw.sync?.latency, 4), 2, 15);
   result.audio.mode = ['a', 'b', 'both', 'none'].includes(a.mode) ? a.mode : 'both';
   result.audio.master = clamp(number(a.master, 80), 0, 100);
   result.audio.monitor = typeof a.monitor === 'boolean' ? a.monitor : true;

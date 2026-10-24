@@ -35,10 +35,10 @@ export class Compositor {
       const dx = settings.x / 100 * w, dy = settings.y / 100 * h, dw = settings.w / 100 * w, dh = settings.h / 100 * h;
       ctx.save(); ctx.beginPath(); ctx.rect(dx, dy, dw, dh); ctx.clip(); ctx.globalAlpha = settings.opacity / 100;
       ctx.fillStyle = '#0c1014'; ctx.fillRect(dx, dy, dw, dh);
-      if (video?.readyState >= 2 && video.videoWidth > 0 && sources[id]?.stream?.getVideoTracks().some(track => track.readyState === 'live')) {
+      if (video?.readyState >= 2 && video.videoWidth > 0 && (sources[id]?.player?.connected || sources[id]?.stream?.getVideoTracks().some(track => track.readyState === 'live'))) {
         const geometry = drawGeometry(settings, video.videoWidth, video.videoHeight, w, h);
         ctx.drawImage(video, ...geometry);
-      } else if (CHANNELS.some(key => sources[key]?.stream)) {
+      } else if (CHANNELS.some(key => sources[key]?.stream || sources[key]?.player)) {
         const scale = w / 1920;
         ctx.fillStyle = id === 'A' ? '#719e8a' : '#9589b0'; ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
         ctx.font = `500 ${Math.max(12, 28 * scale)}px "Segoe UI", "Microsoft YaHei", sans-serif`;

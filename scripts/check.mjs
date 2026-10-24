@@ -10,7 +10,9 @@ for (const file of files.filter(file => file.endsWith('.js'))) {
   try { execFileSync(process.execPath, ['--check', file], { stdio: 'pipe' }); } catch (error) { errors.push(`${file}: ${error.stderr}`); }
   const source = fs.readFileSync(file, 'utf8');
   if (/兜底|不保证|不代表|未验证/.test(source)) errors.push(`Disallowed product copy in ${file}`);
-  for (const match of source.matchAll(/\bfrom\s+['"](\.[^'"]+)['"]/g)) if (!fs.existsSync(path.resolve(path.dirname(file), match[1]))) errors.push(`Missing module: ${match[1]}`);
+  if (!file.includes(`${path.sep}vendor${path.sep}`)) {
+    for (const match of source.matchAll(/\bfrom\s+['"](\.[^'"]+)['"]/g)) if (!fs.existsSync(path.resolve(path.dirname(file), match[1]))) errors.push(`Missing module: ${match[1]}`);
+  }
 }
 const manifest = JSON.parse(fs.readFileSync(path.join(extension, 'manifest.json'), 'utf8'));
 if (manifest.manifest_version !== 3) errors.push('Manifest must use version 3');

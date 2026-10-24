@@ -4,6 +4,7 @@ export class AudioMixer {
   constructor() {
     this.context = null; this.tracks = new Map(); this.master = null;
     this.destination = null; this.monitor = null; this.limiter = null;
+    this.elements = new WeakMap();
   }
   async init() {
     if (!this.context) {
@@ -26,6 +27,18 @@ export class AudioMixer {
     await this.init(); this.detach(id);
     if (!stream.getAudioTracks().length) return false;
     const source = this.context.createMediaStreamSource(new MediaStream(stream.getAudioTracks()));
+    return this.install(id, source);
+  }
+  async attachElement(id, video) {
+    await this.init(); this.detach(id);
+    let source = this.elements.get(video);
+    if (!source) { source = this.context.createMediaElementSource(video); this.elements.set(video, source); }
+    // The media element's decoded A/V clock remains authoritative. Seeking or
+    // slowing a whole source changes its video and audio together.
+    video.muted = false; video.volume = 1;
+    return this.install(id, source);
+  }
+  install(id, source) {
     const gain = this.context.createGain(); gain.gain.value = 0;
     const highpass = this.context.createBiquadFilter(); highpass.type = 'highpass'; highpass.frequency.value = 150;
     const lowpass = this.context.createBiquadFilter(); lowpass.type = 'lowpass'; lowpass.frequency.value = 4200;

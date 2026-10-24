@@ -9,9 +9,11 @@ export class CropEditor {
     stage.addEventListener('pointerup', () => { this.drag = null; });
     stage.addEventListener('pointercancel', () => { this.drag = null; });
     stage.addEventListener('lostpointercapture', () => { this.drag = null; });
-    dialog.addEventListener('close', () => { video.srcObject = null; this.drag = null; });
+    dialog.addEventListener('close', () => { video.srcObject = null; this.ownedStream?.getTracks().forEach(track => track.stop()); this.ownedStream = null; this.drag = null; });
   }
-  async open(sourceId, stream, crop) {
+  async open(sourceId, input, crop) {
+    const stream = input instanceof HTMLVideoElement ? input.captureStream() : input;
+    this.ownedStream = input instanceof HTMLVideoElement ? stream : null;
     if (!stream?.getVideoTracks().some(track => track.readyState === 'live')) throw new Error('请先接入此直播源，再框选裁剪区域');
     this.sourceId = sourceId; this.draft = { ...crop }; this.video.srcObject = stream;
     await this.video.play();

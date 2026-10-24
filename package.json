@@ -1,18 +1,24 @@
 {
   "name": "three-way-fusion",
-  "version": "0.1.1",
+  "version": "0.2.0",
   "private": true,
   "type": "module",
   "description": "三路融合姬 · 双 Bilibili 直播间融合工作台",
   "scripts": {
-    "test": "node --test tests/model.test.mjs tests/startup.test.mjs",
+    "test": "node --test tests/*.test.mjs",
     "check": "node scripts/check.mjs",
     "preview": "node scripts/preview.mjs",
     "package": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/package.ps1",
     "test:browser": "node scripts/browser-smoke.mjs",
-    "test:extension": "node scripts/extension-smoke.mjs"
+    "test:extension": "node scripts/extension-smoke.mjs",
+    "test:live": "node scripts/live-smoke.mjs",
+    "vendor": "node scripts/vendor.mjs"
   },
   "engines": {
     "node": ">=20"
+  },
+  "dependencies": {
+    "hls.js": "1.7.3",
+    "mpegts.js": "1.8.2"
   }
 }

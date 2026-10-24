@@ -1,6 +1,17 @@
 import { openStudio } from './lib/launch.js';
+import { BilibiliApi } from './lib/bilibili-api.js';
 
 const studioUrl = chrome.runtime.getURL('studio.html');
+const api = new BilibiliApi({ cookie: async name => (await chrome.cookies.get({ url: 'https://www.bilibili.com/', name }))?.value || null });
+// Only this extension's API, media and WebSocket requests receive these headers.
+const networkReady = chrome.declarativeNetRequest.updateDynamicRules({
+  removeRuleIds: [1001], addRules: [{ id: 1001, priority: 1, action: { type: 'modifyHeaders', requestHeaders: [
+    { header: 'Referer', operation: 'set', value: 'https://live.bilibili.com/' },
+    { header: 'Origin', operation: 'set', value: 'https://live.bilibili.com' }
+  ] }, condition: { initiatorDomains: [chrome.runtime.id],
+    requestDomains: ['bilibili.com', 'bilivideo.com', 'bilivideo.cn', 'biliapi.net'],
+    resourceTypes: ['xmlhttprequest', 'media', 'websocket'] } }]
+});
 
 chrome.action.onClicked.addListener(() => {
   openStudio().catch(error => console.error('打开工作台失败', error));
@@ -33,6 +44,9 @@ chrome.runtime.onMessage.addListener((message, sender, respond) => {
   if (!isStudio(sender)) return;
   (async () => {
     switch (message?.type) {
+      case 'LIVE_PLAY_INFO': await networkReady; return api.play(message.roomId, message.quality);
+      case 'LIVE_DANMAKU_SESSION': await networkReady; return api.danmaku(message.roomId);
+      case 'LIVE_SEND_DANMAKU': await networkReady; return api.send(message.roomId, message.text);
       case 'LIST_ROOMS': {
         const tabs = await chrome.tabs.query({ url: 'https://live.bilibili.com/*' });
         return tabs.filter(tab => /^https:\/\/live\.bilibili\.com\/\d+(?:[/?#]|$)/.test(tab.url || ''))
