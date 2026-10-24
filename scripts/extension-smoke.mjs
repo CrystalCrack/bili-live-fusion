@@ -20,8 +20,30 @@ try {
   await context.route('https://live.bilibili.com/**', route => route.fulfill({ status: 200, contentType: 'text/html; charset=utf-8', body: fixture }));
   const worker = context.serviceWorkers()[0] || await context.waitForEvent('serviceworker');
   const extensionId = new URL(worker.url()).hostname;
-  const studio = await context.newPage(); studio.on('pageerror', error => errors.push(error.message));
-  await studio.goto(`chrome-extension://${extensionId}/studio.html`); await studio.locator('#room-A').fill('12345');
+  const studioUrl = `chrome-extension://${extensionId}/studio.html`;
+  const manifest = await worker.evaluate(() => chrome.runtime.getManifest());
+  assert.equal(manifest.action.default_popup, 'launcher.html');
+  assert.deepEqual(manifest.options_ui, { page: 'studio.html', open_in_tab: true });
+  const studioOpened = context.waitForEvent('page', page => page.url() === studioUrl);
+  await worker.evaluate(() => chrome.action.openPopup());
+  const studio = await studioOpened; studio.on('pageerror', error => errors.push(error.message));
+  await studio.locator('#room-A').waitFor();
+  await studio.waitForFunction(async () => (await chrome.runtime.getContexts({ contextTypes: ['POPUP'] })).length === 0);
+  console.log('PASS toolbar popup opens the studio through the browser action entry point');
+  const studioId = await studio.evaluate(async () => (await chrome.tabs.getCurrent()).id);
+  const otherTab = context.pages().find(page => page !== studio);
+  await otherTab.bringToFront();
+  // Edge tears down the native popup after its document context disappears.
+  await otherTab.waitForTimeout(400);
+  await worker.evaluate(async id => {
+    const tab = await chrome.tabs.get(id);
+    await chrome.windows.update(tab.windowId, { focused: true });
+    await chrome.action.openPopup({ windowId: tab.windowId });
+  }, studioId);
+  await studio.waitForFunction(async id => (await chrome.tabs.get(id)).active, studioId);
+  assert.equal(await worker.evaluate(async () => (await chrome.tabs.query({ url: chrome.runtime.getURL('studio.html') })).length), 1);
+  console.log('PASS repeated toolbar activation focuses the same studio tab');
+  await studio.locator('#room-A').fill('12345');
   const roomPromise = context.waitForEvent('page'); await studio.locator('[data-open="A"]').click(); const room = await roomPromise;
   await room.waitForURL('https://live.bilibili.com/12345');
   // Extension-created tabs can navigate before Playwright attaches its request
@@ -55,5 +77,5 @@ try {
   console.log('PASS room validation, command allowlist and live player crop detection');
   assert.deepEqual(errors, []);
   await studio.screenshot({ path: path.join(artifacts, 'extension-integration.png'), fullPage: true });
-  console.log(JSON.stringify({ passed: 4, extensionId, errors }, null, 2));
+  console.log(JSON.stringify({ passed: 6, extensionId, errors }, null, 2));
 } finally { await context.close(); }

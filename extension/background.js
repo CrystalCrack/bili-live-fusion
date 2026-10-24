@@ -1,13 +1,9 @@
+import { openStudio } from './lib/launch.js';
+
 const studioUrl = chrome.runtime.getURL('studio.html');
 
-chrome.action.onClicked.addListener(async () => {
-  const tabs = await chrome.tabs.query({ url: studioUrl });
-  if (tabs[0]?.id) {
-    await chrome.tabs.update(tabs[0].id, { active: true });
-    await chrome.windows.update(tabs[0].windowId, { focused: true });
-  } else {
-    await chrome.tabs.create({ url: studioUrl });
-  }
+chrome.action.onClicked.addListener(() => {
+  openStudio().catch(error => console.error('打开工作台失败', error));
 });
 
 function isStudio(sender) {
