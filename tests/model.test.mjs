@@ -79,3 +79,10 @@ test('regex validator rejects expensive patterns and accepts simple useful filte
   assert.equal(compileFilterRegex('[0-9]+').test('123'), true);
   assert.equal(compileFilterRegex('[*+?]+').test('**+?'), true);
 });
+
+test('repeating an audience message keeps own highlight while own duplicates remain filtered', () => {
+  const d = defaultScene().danmaku, filter = new DanmakuFilter();
+  assert.equal(filter.accept({ source: 'A', text: '一起看', self: false }, d, 1000), true);
+  assert.equal(filter.accept({ source: 'A', text: '一起看', self: true }, d, 1100), true);
+  assert.equal(filter.accept({ source: 'B', text: '一起看', self: true }, d, 1200), false);
+});

@@ -38,7 +38,7 @@ export class WatchDanmaku {
       if (occupied.every(item => item.animation.playState !== 'paused' && this.position(item) + item.width + 30 * scale < this.width)) { row = candidate; break; }
     }
     if (row < 0) return;
-    const element = document.createElement('div'); element.className = `watch-comment source-${raw.source.toLowerCase()}`; element.tabIndex = 0;
+    const element = document.createElement('div'); element.className = `watch-comment source-${raw.source.toLowerCase()}${raw.self ? ' self' : ''}`; element.tabIndex = 0;
     element.dataset.source = raw.source; element.dataset.text = raw.text;
     element.setAttribute('aria-label', `${raw.source}：${raw.text}，复制或加一发送`);
     Object.assign(element.style, { top: `${row * spacing + top}px`, fontSize: `${size}px`, opacity: String(settings.opacity / 100) });

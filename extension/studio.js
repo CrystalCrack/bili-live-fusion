@@ -8,6 +8,7 @@ import { LivePlayer } from './lib/live-player.js';
 import { DanmakuClient } from './lib/danmaku.js';
 import { withTimeout } from './lib/async.js';
 import { LiveSession } from './lib/live-session.js';
+import { WatchView } from './watch.js';
 
 const $ = selector => document.querySelector(selector);
 const $$ = selector => [...document.querySelectorAll(selector)];
@@ -23,7 +24,8 @@ const sourceActive = source => Boolean(source.player?.connected || source.stream
 const mixer = new AudioMixer();
 const compositor = new Compositor($('#composite'), () => scene, () => sources);
 let filter = new DanmakuFilter();
-let cropEditor;
+let cropEditor, watchView;
+let activeView = 'studio', studioScroll = 0;
 const connectionEvents = [];
 let audioStarting = false;
 let observedAudioContext = null;
@@ -106,7 +108,7 @@ function saveScene() {
     } catch { $('#save-status').textContent = '保存失败，可导出场景'; }
   }, 400);
 }
-function changed() { mixer.update(scene); outputServer?.updateState(); saveScene(); }
+function changed() { mixer.update(scene); watchView?.setState(watchState()); outputServer?.updateState(); saveScene(); }
 function setValue(selector, value, force = false) {
   const input = $(selector); if (force || document.activeElement !== input) input.value = value;
 }
@@ -138,6 +140,7 @@ function updateInspector() {
 }
 function selectSource(id) { scene.selected = id; updateInspector(); saveScene(); }
 function updateConnected() {
+  watchView?.setState(watchState());
   outputServer?.updateState();
   let count = 0, demo = false;
   for (const id of CHANNELS) {
@@ -377,11 +380,12 @@ function acceptDanmaku(item) {
     if (!filter.accept(item, scene.danmaku)) { filteredCount++; return; }
   } catch (error) { toast(error.message, 'error'); return; }
   compositor.addDanmaku(item);
-  outputServer?.publish('watch-danmaku', { item: { source: item.source, text: String(item.text).slice(0, 300), user: String(item.user || '').slice(0, 60) } });
+  watchView?.add(item);
+  outputServer?.publish('watch-danmaku', { item: { source: item.source, text: String(item.text).slice(0, 300), user: String(item.user || '').slice(0, 60), self: item.self === true } });
   const feed = $('#danmaku-feed');
   const stick = feed.scrollHeight - feed.scrollTop - feed.clientHeight < 60;
   feed.querySelector('.feed-empty')?.remove();
-  const row = document.createElement('div'); row.className = `danmaku-row ${item.source.toLowerCase()}`;
+  const row = document.createElement('div'); row.className = `danmaku-row ${item.source.toLowerCase()}${item.self ? ' self' : ''}`;
   const badge = document.createElement('span'); badge.className = `source-badge ${item.source.toLowerCase()}`; badge.textContent = item.source;
   const user = document.createElement('span'); user.className = 'dm-user'; user.textContent = item.user || '观众';
   const text = document.createElement('span'); text.className = 'dm-text'; text.textContent = String(item.text).slice(0, 300);
@@ -392,6 +396,7 @@ function acceptDanmaku(item) {
   if (stick) feed.scrollTop = feed.scrollHeight;
 }
 function clearDanmaku() {
+  watchView?.clear();
   outputServer?.publish('watch-clear');
   compositor.clearDanmaku(); filter = new DanmakuFilter(); filteredCount = 0; $('#danmaku-count').textContent = '0';
   $('#danmaku-feed').replaceChildren();
@@ -434,7 +439,7 @@ async function submitDanmaku(text, target) {
       const source = sources[id], tabId = source.tabId, roomId = source.roomId;
       if ((roomId && sentRoomIds.has(roomId)) || (!roomId && tabId && sentTabIds.has(tabId))) continue;
       try {
-        if (source.demo) acceptDanmaku({ source: id, text, user: '我 · 演示', uid: 'demo-self', timestamp: Date.now() });
+        if (source.demo) acceptDanmaku({ source: id, text, user: '我 · 演示', uid: 'demo-self', self: true, timestamp: Date.now() });
         else if (roomId) { await request({ type: 'LIVE_SEND_DANMAKU', roomId, text }); sentRoomIds.add(roomId); }
         else if (tabId) { await roomCommand(id, { type: 'SEND_DANMAKU', text }); sentTabIds.add(tabId); }
         else throw new Error('请先连接直播间');
@@ -535,6 +540,19 @@ async function outputStream() { await mixer.init(); mixer.update(scene); return 
 function watchState() {
   return { danmaku: { ...scene.danmaku }, sources: CHANNELS.map(id => ({ id, room: sources[id].roomId || parseRoomId(scene.sources[id].room) || '', available: Boolean(sources[id].demo || sources[id].roomId || sources[id].tabId) })) };
 }
+function switchView(view) {
+  if (activeView === view) return;
+  if (view === 'watch') studioScroll = scrollY;
+  activeView = view;
+  if (view === 'studio') watchView.leave();
+  document.body.classList.toggle('watch-mode', view === 'watch');
+  $('#studio-view').hidden = view !== 'studio'; $('#watch-view').hidden = view !== 'watch';
+  for (const key of ['studio', 'watch']) { const button = $('#' + key + '-tab'); button.classList.toggle('active', key === view); button.setAttribute('aria-pressed', String(key === view)); }
+  compositor.previewEnabled = view === 'studio';
+  mixer.setMonitorSuppressed(view === 'watch' || Boolean(outputServer?.watching));
+  if (view === 'watch') { activateAudio(); watchView.enter(); window.scrollTo(0, 0); }
+  else { if (document.fullscreenElement === $('#watch-player')) document.exitFullscreen().catch(() => {}); window.scrollTo(0, studioScroll); $('#studio-tab').focus({ preventScroll: true }); }
+}
 async function openOutput(view = 'output') {
   if (!hasSource()) { toast('请先连接直播间或开启演示，再打开播放窗口', 'warning'); return; }
   try {
@@ -543,7 +561,7 @@ async function openOutput(view = 'output') {
     if (!outputServer) outputServer = new OutputServer(view => compositor.createStream(mixer.outputTracks(), { danmaku: view !== 'watch' }), message => toast(message, 'error'), {
       getState: watchState, onSend: submitDanmaku,
       onFocus: () => { if (extension) chrome.tabs.getCurrent().then(tab => { if (tab) return chrome.tabs.update(tab.id, { active: true }).then(() => chrome.windows.update(tab.windowId, { focused: true })); }).catch(() => {}); else window.focus(); },
-      onWatching: watching => mixer.setMonitorSuppressed(watching)
+      onWatching: watching => mixer.setMonitorSuppressed(activeView === 'watch' || watching)
     });
     outputServer.open(view); await mixer.init(); mixer.update(scene);
   } catch (error) { toast(error.message, 'error'); }
@@ -653,7 +671,9 @@ function bindEvents() {
   $('#filter-button').addEventListener('click', openFilter); $('#apply-filter').addEventListener('click', applyFilter); $('#clear-danmaku').addEventListener('click', () => { clearDanmaku(); toast('弹幕记录与画布已清空'); });
   for (const key of ['size', 'opacity', 'speed', 'area']) $(`#dm-${key}`).addEventListener('input', event => { $(`#dm-${key}-value`).textContent = `${event.target.value}${key === 'size' ? ' px' : key === 'speed' ? ' s' : '%'}`; });
   $('#send-form').addEventListener('submit', sendDanmaku);
-  $('#watch-button').addEventListener('click', () => openOutput('watch'));
+  $('#watch-button').addEventListener('click', () => switchView('watch'));
+  $('#watch-tab').addEventListener('click', () => switchView('watch'));
+  $('#studio-tab').addEventListener('click', () => switchView('studio'));
   $('#output-button').addEventListener('click', () => openOutput());
   $('#live-output-button').addEventListener('click', () => openOutput());
   $('#fullscreen-button').addEventListener('click', async () => { try { if (document.fullscreenElement) await document.exitFullscreen(); else await $('#canvas-stage').requestFullscreen(); } catch (error) { toast(error.message, 'error'); } });
@@ -677,7 +697,7 @@ function bindEvents() {
     catch { toast('请在连接信息中选中文字复制', 'warning'); }
   });
   $('#scene-button').addEventListener('click', () => $('#scene-dialog').showModal());
-  $('#settings-button').addEventListener('click', () => { $('#output-settings').scrollIntoView({ behavior: 'smooth', block: 'center' }); $('#resolution').focus({ preventScroll: true }); });
+  $('#settings-button').addEventListener('click', () => { switchView('studio'); $('#output-settings').scrollIntoView({ behavior: 'smooth', block: 'center' }); $('#resolution').focus({ preventScroll: true }); });
   $('#scene-name').addEventListener('input', event => { scene.name = event.target.value.slice(0, 60) || '未命名场景'; saveScene(); });
   $('#export-scene').addEventListener('click', exportScene); $('#import-scene').addEventListener('click', () => $('#scene-file').click());
   $('#scene-file').addEventListener('change', event => importScene(event.target.files[0]));
@@ -703,7 +723,7 @@ function bindEvents() {
   });
   window.addEventListener('pagehide', () => {
     clearInterval(meterTimer); clearInterval(demoTimer); clearInterval(recordTimer);
-    outputServer?.close(); compositor.stop();
+    watchView?.close(); outputServer?.close(); compositor.stop();
     for (const id of CHANNELS) { sources[id].player?.stop(); sources[id].chat?.stop(); sources[id].demo?.stop(); sources[id].stream?.getTracks().forEach(track => track.stop()); }
     mixer.close(); if (recordingUrl) URL.revokeObjectURL(recordingUrl);
   }, { once: true });
@@ -717,8 +737,11 @@ async function init() {
   cropEditor = new CropEditor({ dialog: $('#crop-dialog'), stage: $('#crop-stage'), box: $('#crop-box'), video: $('#crop-video'), label: $('#crop-dimensions'),
     onApply(id, crop) { scene.sources[id].crop = crop; scene.selected = id; updateInspector(); changed(); toast(`直播间 ${id} 裁剪已应用到实时画布`); }
   });
+  watchView = new WatchView($('#watch-player'), { read: () => ({ scene, sources }), getState: watchState,
+    getAudio: () => new MediaStream(mixer.outputTracks().map(track => track.clone())), onSend: submitDanmaku, onStudio: () => switchView('studio') });
   buildAudioTracks(); bindTransform(); bindEvents(); syncScene(); updateAudioState(); restoring = false; compositor.start();
   meterTimer = setInterval(() => {
+    if (activeView !== 'studio') return;
     for (const id of CHANNELS) {
       const { percent, db } = mixer.level(id);
       $(`#db-${id}`).textContent = db > -80 ? `${db.toFixed(1)} dB` : '−∞ dB';

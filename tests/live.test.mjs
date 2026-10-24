@@ -93,3 +93,18 @@ test('API signs danmaku sessions, uses canonical play data, sends with CSRF and 
   now += 5000; await api.send('123', '再来一条');
   await assert.rejects(api.play('https://evil.com/123'), /房间号/);
 });
+
+test('own danmaku follows authenticated UID and never text or anonymous UID', async () => {
+  for (const uid of [42, 0]) {
+    let ws; const messages = [];
+    const client = new DanmakuClient({ session: async () => ({ roomId: '123', uid, token: 't', hosts: [{ host: 'test', wss_port: 443 }] }),
+      socket: () => (ws = { readyState: 1, send() {}, close() {} }), onState() {}, onMessage: item => messages.push(item) });
+    try {
+      client.start(); await new Promise(resolve => setImmediate(resolve)); ws.onopen();
+      ws.onmessage({ data: packet(8, '{"code":0}').buffer });
+      for (const sender of [42, 99, 0]) ws.onmessage({ data: packet(5, JSON.stringify({ cmd: 'DANMU_MSG', info: [[], '相同的文本', [sender, '同名用户']] }), 0).buffer });
+      await new Promise(resolve => setImmediate(resolve));
+      assert.deepEqual(messages.map(item => item.self), uid ? [true, false, false] : [false, false, false]);
+    } finally { client.stop(); }
+  }
+});

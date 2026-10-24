@@ -87,7 +87,10 @@ export class DanmakuClient {
               clearInterval(this.heartbeat);
               this.heartbeat = setInterval(() => { if (!current()) return; if (Date.now() - lastReply > 75000) ws.close(); else if (ws.readyState === 1) ws.send(packet(2, '[object Object]')); }, 25000);
             } else if (message.operation === 3) lastReply = Date.now();
-            else if (authenticated) { const item = toDanmaku(message.data); if (item) this.onMessage(item); }
+            else if (authenticated) {
+              const item = toDanmaku(message.data);
+              if (item) this.onMessage({ ...item, self: Number(session.uid) > 0 && item.uid === String(session.uid) });
+            }
           }
         }).catch(error => { if (current()) { this.onState('error', error.message); ws.close(); } });
       };

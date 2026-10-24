@@ -157,7 +157,7 @@ export class DanmakuFilter {
     if (blocked.includes(String(item.uid)) || blocked.includes(String(item.user))) return false;
     if (this.cachedPattern !== settings.regex) { this.regex = compileFilterRegex(settings.regex); this.cachedPattern = settings.regex; }
     if (this.regex?.test(text)) return false;
-    const key = text.trim().toLocaleLowerCase();
+    const key = `${item.self ? 'self:' : 'audience:'}${text.trim().toLocaleLowerCase()}`;
     if (settings.dedupe && this.seen.has(key) && now - this.seen.get(key) < 8000) return false;
     const second = Math.floor(now / 1000);
     if (second !== this.second) { this.second = second; this.count = 0; }

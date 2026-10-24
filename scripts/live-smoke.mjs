@@ -35,7 +35,7 @@ try {
   await context.route('https://api.bilibili.com/**', async route => {
     const url = new URL(route.request().url());
     let body = { code: 0, data: {} };
-    if (url.pathname.endsWith('/nav')) body.data = { isLogin: false, wbi_img: {
+    if (url.pathname.endsWith('/nav')) body.data = { isLogin: true, mid: 7, wbi_img: {
       img_url: 'https://i0.hdslb.com/bfs/wbi/7cd084941338484aae1ad9425b84077c.png',
       sub_url: 'https://i0.hdslb.com/bfs/wbi/4932caff0ff746eab6f01bf08b70ac45.png' } };
     else if (url.pathname.endsWith('/spi')) body.data = { b_3: 'test-buvid' };
@@ -48,7 +48,8 @@ try {
       const form = new URLSearchParams(route.request().postData());
       assert.equal(form.get('csrf'), 'watch-fixture-csrf'); assert.equal(form.get('csrf_token'), 'watch-fixture-csrf');
       sentMessages.push({ room: form.get('roomid'), text: form.get('msg') });
-      await route.fulfill({ json: { code: 0, data: { msg: 'success' } } }); return;
+      await route.fulfill({ json: { code: 0, data: { msg: 'success' } } });
+      sockets.get(form.get('roomid'))?.send(Buffer.from(packet(5, JSON.stringify({ cmd: 'DANMU_MSG', info: [[], form.get('msg'), [7, '当前账号']] }), 0))); return;
     }
     if (url.pathname.endsWith('getDanmuInfo')) {
       assert.ok(url.searchParams.get('w_rid')); await route.fulfill({ json: { code: 0, data: { token: 'fixture-token', host_list: [{ host: 'fixture.chat.bilibili.com', wss_port: 443 }] } } }); return;
@@ -78,7 +79,7 @@ try {
       const bytes = typeof message === 'string' ? new TextEncoder().encode(message) : new Uint8Array(message);
       const operation = new DataView(bytes.buffer, bytes.byteOffset).getUint32(8);
       if (operation === 7) {
-        const auth = JSON.parse(new TextDecoder().decode(bytes.slice(16))); assert.equal(auth.protover, 2); room = String(auth.roomid); sockets.set(room, ws);
+        const auth = JSON.parse(new TextDecoder().decode(bytes.slice(16))); assert.equal(auth.protover, 2); assert.equal(auth.uid, 7); room = String(auth.roomid); sockets.set(room, ws);
         ws.send(Buffer.from(packet(8, '{"code":0}'))); ws.send(Buffer.from(packet(5, deflateSync(packet(5, JSON.stringify({ cmd: 'DANMU_MSG', info: [[], `房间 ${room} 的实时弹幕`, [42, '测试观众']] }), 0)), 2)));
       } else if (operation === 2) ws.send(Buffer.from(packet(3, new Uint8Array([0, 0, 0, 1]))));
     });
@@ -139,9 +140,9 @@ try {
   console.log('PASS continuous real-time composed output with video and mixed audio');
   await output.close(); await page.bringToFront();
   await context.addCookies([{ name: 'bili_jct', value: 'watch-fixture-csrf', domain: '.bilibili.com', path: '/', secure: true, sameSite: 'None' }]);
-  const watchOpened = context.waitForEvent('page'); await page.locator('#watch-button').click(); const watch = await watchOpened;
+  await page.locator('#watch-button').click(); const watch = page;
   watch.on('pageerror', error => errors.push(error.message));
-  await watch.waitForFunction(() => document.querySelector('#watch-video')?.videoWidth === 1920 && document.querySelector('#watch-state').hidden);
+  await watch.waitForFunction(() => document.querySelector('#watch-player')?.classList.contains('direct') && document.querySelector('#watch-canvas').width > 0 && document.querySelector('#watch-state').hidden);
   sockets.get('67890').send(Buffer.from(packet(5, JSON.stringify({ cmd: 'DANMU_MSG', info: [[], '观看页真实链路弹幕', [52, '测试观众']] }), 0)));
   await watch.waitForFunction(() => [...document.querySelectorAll('.watch-comment')].some(el => el.dataset.text === '观看页真实链路弹幕'));
   await watch.waitForFunction(() => { const el = [...document.querySelectorAll('.watch-comment')].find(el => el.dataset.text === '观看页真实链路弹幕'), layer = document.querySelector('#watch-danmaku'); return el && el.getBoundingClientRect().right < layer.getBoundingClientRect().right - 20; });
@@ -149,6 +150,9 @@ try {
   await comment.getByRole('button', { name: '+1 发送到 B', exact: true }).click();
   await watch.waitForFunction(() => document.querySelector('#watch-notice').textContent.includes('已向 B 发送'));
   assert.deepEqual(sentMessages, [{ room: '67890', text: '观看页真实链路弹幕' }]);
+  await watch.locator('.watch-comment.self[data-text="观看页真实链路弹幕"]').waitFor();
+  assert.equal(await watch.locator('.watch-comment.source-b.self[data-text="观看页真实链路弹幕"]').evaluate(el => getComputedStyle(el).color), 'rgb(255, 209, 102)');
+  assert.equal(await page.locator('.danmaku-row.b.self').filter({ hasText: '观看页真实链路弹幕' }).count(), 1);
   await watch.locator('#watch-send-target').selectOption('B'); await watch.locator('#watch-send-text').fill('再次发送'); await watch.locator('#watch-send').click();
   await watch.waitForFunction(() => document.querySelector('#watch-notice').textContent.includes('5 秒'));
   assert.equal(sentMessages.length, 1);
@@ -156,7 +160,7 @@ try {
   await watch.waitForFunction(() => document.querySelector('#watch-notice').textContent.includes('已向 A 发送'));
   assert.deepEqual(sentMessages.at(-1), { room: '12345', text: '观看页输入弹幕' });
   console.log('PASS extension watch receives direct live video and WebSocket chat; +1 and input send through CSRF API with cooldown');
-  await watch.close(); await page.bringToFront();
+  await page.locator('#studio-tab').click();
   await page.locator('#open-crop-editor').click(); await page.locator('#crop-dialog').waitFor({ state: 'visible' }); await page.locator('#crop-apply').click();
   console.log('PASS visual crop editor accepts a decoded direct-live source');
   await page.locator('#room-B').fill('99999'); await page.locator('[data-connect="B"]').click();

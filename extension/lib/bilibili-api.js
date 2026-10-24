@@ -42,7 +42,7 @@ export class BilibiliApi {
   async danmaku(room) {
     const roomId = parseRoomId(room); if (!roomId) throw new Error('请输入正确的房间号');
     for (let attempt = 0; attempt < 2; attempt++) {
-      const nav = await this.nav(attempt > 0);
+      const nav = await this.nav(true);
       const query = signWbi({ id: roomId, type: 0, web_location: '444.8' }, nav.wbi_img, this.now());
       const result = await this.json(`https://api.live.bilibili.com/xlive/web-room/v1/index/getDanmuInfo?${query}`);
       if (result.code === 0 && result.data?.token) {

@@ -61,6 +61,10 @@ try {
   await room.evaluate(() => { const el = document.createElement('div'); el.className = 'chat-item danmaku-item'; el.dataset.danmaku = '来自真实内容脚本的弹幕'; el.dataset.uid = '42'; const user = document.createElement('span'); user.className = 'user-name'; user.textContent = '测试观众'; el.append(user); document.querySelector('#chat-items').append(el); });
   await studio.waitForFunction(() => document.querySelector('#danmaku-feed').textContent.includes('来自真实内容脚本的弹幕'));
   console.log('PASS fresh room DOM comments route to the bound studio source; history is excluded');
+  await context.addCookies([{ name: 'DedeUserID', value: '42', domain: '.bilibili.com', path: '/', secure: true, sameSite: 'None' }]);
+  await room.evaluate(() => { const el = document.createElement('div'); el.className = 'chat-item danmaku-item'; el.dataset.danmaku = '当前账号关联弹幕'; el.dataset.uid = '42'; document.querySelector('#chat-items').append(el); });
+  await studio.locator('.danmaku-row.self').filter({ hasText: '当前账号关联弹幕' }).waitFor();
+  assert.equal(await studio.locator('.danmaku-row.self .dm-text').evaluate(el => getComputedStyle(el).color), 'rgb(255, 209, 102)');
   await studio.locator('#send-text').fill('工作台发送集成测试'); await studio.locator('#send-form button').click();
   await room.waitForFunction(() => globalThis.mockSubmissions.length === 1);
   assert.deepEqual(await room.evaluate(() => globalThis.mockSubmissions), ['工作台发送集成测试']);

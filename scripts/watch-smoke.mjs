@@ -17,7 +17,7 @@ page.on('pageerror', error => errors.push(error.message));
 const check = async (name, action) => { await action(); results.push(name); console.log(`PASS ${name}`); };
 let watch;
 async function studioSend(text, source = 'A') {
-  await page.locator('#send-target').selectOption(source); await page.locator('#send-text').fill(text); await page.locator('#send-form button').click();
+  await watch.locator('#watch-send-target').selectOption(source); await watch.locator('#watch-send-text').fill(text); await watch.locator('#watch-send').click();
 }
 async function visibleComment(text) {
     const comment = watch.locator('.watch-comment').filter({ has: watch.locator('.comment-text', { hasText: text }) }).first();
@@ -30,9 +30,11 @@ try {
   await page.waitForFunction(() => document.querySelector('#source-count').textContent === '2 / 2 已接入');
   await page.locator('#filter-button').click(); await page.locator('label').filter({ has: page.locator('#filter-dedupe') }).click(); await page.locator('#apply-filter').click();
   await check('watch page receives advancing live video and mixed audio', async () => {
-    const opened = page.waitForEvent('popup'); await page.locator('#watch-button').click(); watch = await opened;
-    await watch.waitForFunction(() => document.querySelector('#watch-video')?.videoWidth === 1920 && document.querySelector('#watch-state').hidden);
-    assert.match(watch.url(), /watch\.html#/);
+    await page.locator('#watch-button').click(); watch = page;
+    await watch.waitForFunction(() => document.querySelector('#watch-player')?.classList.contains('direct') && document.querySelector('#watch-canvas').width > 0 && document.querySelector('#watch-state').hidden);
+    assert.equal(context.pages().length, 1);
+    assert.equal(await page.locator('#studio-view').isVisible(), false);
+    assert.equal(await page.locator('#watch-tab').getAttribute('aria-pressed'), 'true');
     assert.equal(await watch.locator('#watch-video').evaluate(v => v.srcObject.getAudioTracks().length), 1);
     const before = await watch.locator('#watch-video').evaluate(v => v.currentTime);
     await watch.waitForFunction(t => document.querySelector('#watch-video').currentTime > t + 1, before);
@@ -44,6 +46,10 @@ try {
     await page.waitForFunction(() => [...document.querySelectorAll('.danmaku-row.b')].some(el => el.textContent.includes('<b>观看页发送</b>')));
     await watch.waitForFunction(() => document.querySelector('#watch-send-text').value === '');
     assert.equal(await watch.locator('.watch-comment b').count(), 0);
+    const own = watch.locator('.watch-comment.self').filter({ hasText: '<b>观看页发送</b>' });
+    await own.waitFor();
+    assert.equal(await own.evaluate(el => getComputedStyle(el).color), 'rgb(255, 209, 102)');
+    assert.equal(await page.locator('.danmaku-row.b.self').filter({ hasText: '<b>观看页发送</b>' }).count(), 1);
   });
   await check('hover freezes one comment while video continues; copy keeps original text', async () => {
     await studioSend('悬停复制这条弹幕');
@@ -75,13 +81,15 @@ try {
     await watch.locator('#watch-send-text').press('Enter');
     await page.waitForFunction(() => ['a', 'b'].every(id => [...document.querySelectorAll(`.danmaku-row.${id}`)].some(el => el.textContent.includes('全屏一起看'))));
     await watch.locator('#watch-fullscreen').click(); await watch.waitForFunction(() => !document.fullscreenElement);
-    await watch.locator('#watch-video').dblclick(); await watch.waitForFunction(() => Boolean(document.fullscreenElement));
+    await watch.locator('#watch-picture').dblclick({ position: { x: 100, y: 200 } }); await watch.waitForFunction(() => Boolean(document.fullscreenElement));
     await watch.locator('#watch-fullscreen').click();
   });
   await check('playback, audio, volume and viewer-only danmaku controls work', async () => {
     await watch.locator('#watch-play').click(); assert.equal(await watch.locator('#watch-video').evaluate(v => v.paused), true);
     await watch.locator('#watch-play').click(); await watch.waitForFunction(() => !document.querySelector('#watch-video').paused);
-    await watch.locator('#watch-audio').click(); assert.equal(await watch.locator('#watch-video').evaluate(v => v.muted), false);
+    assert.equal(await watch.locator('#watch-video').evaluate(v => v.muted), false);
+    await watch.locator('#watch-audio').click(); assert.equal(await watch.locator('#watch-video').evaluate(v => v.muted), true);
+    await watch.locator('#watch-audio').click();
     await watch.locator('#watch-volume').fill('35'); assert.equal(await watch.locator('#watch-video').evaluate(v => v.volume), .35);
     await watch.locator('#watch-toggle-danmaku').click(); assert.equal(await watch.locator('#watch-danmaku').isVisible(), false);
     assert.equal(await page.locator('#danmaku-toggle').isChecked(), true);
@@ -92,14 +100,19 @@ try {
     await watch.locator('#watch-send-text').fill('');
   });
   await check('studio filter, visibility and clears propagate to watch page', async () => {
+    await page.locator('#studio-tab').click();
     await page.locator('#filter-button').click(); await page.locator('#filter-keywords').fill('过滤内容'); await page.locator('#apply-filter').click();
+    await page.locator('#watch-tab').click();
     await studioSend('过滤内容不进入观看'); await studioSend('保留内容进入观看', 'B');
     await watch.waitForFunction(() => [...document.querySelectorAll('.watch-comment')].some(el => el.dataset.text === '保留内容进入观看'));
     assert.equal(await watch.locator('.watch-comment').filter({ hasText: '过滤内容' }).count(), 0);
-    await page.locator('label').filter({ has: page.locator('#danmaku-toggle') }).click(); await watch.waitForFunction(() => document.querySelector('#watch-danmaku').hidden);
-    await page.locator('label').filter({ has: page.locator('#danmaku-toggle') }).click(); await watch.waitForFunction(() => !document.querySelector('#watch-danmaku').hidden);
+    await page.locator('#studio-tab').click();
+    await page.locator('label').filter({ has: page.locator('#danmaku-toggle') }).click(); await page.locator('#watch-tab').click(); await watch.waitForFunction(() => document.querySelector('#watch-danmaku').hidden);
+    await page.locator('#studio-tab').click();
+    await page.locator('label').filter({ has: page.locator('#danmaku-toggle') }).click(); await page.locator('#watch-tab').click(); await watch.waitForFunction(() => !document.querySelector('#watch-danmaku').hidden);
+    await page.locator('#studio-tab').click();
     await page.locator('#filter-button').click(); await page.locator('#clear-danmaku').click(); await watch.waitForFunction(() => !document.querySelector('.watch-comment'));
-    await page.locator('#filter-dialog .close-dialog').click();
+    await page.locator('#filter-dialog .close-dialog').click(); await page.locator('#watch-tab').click();
   });
   await check('keyboard interaction keeps action buttons within picture edges', async () => {
     await studioSend('边缘弹幕操作'); const comment = await visibleComment('边缘弹幕操作');
@@ -123,13 +136,22 @@ try {
     await studioSend('一起看，两路现场', 'B'); const comment = await visibleComment('一起看，两路现场'); await comment.hover({ force: true });
     await watch.screenshot({ path: path.join(artifacts, 'watch-hover.png') });
   });
-  await check('retry replaces peer; unavailable source and studio closure remain actionable', async () => {
-    await watch.locator('#watch-retry').evaluate(button => button.click());
-    await watch.waitForFunction(() => document.querySelector('#watch-state').hidden && document.querySelector('#watch-video').readyState >= 2);
-    await page.locator('[data-disconnect="B"]').click();
-    await watch.waitForFunction(() => document.querySelector('#watch-send-target option[value="B"]').disabled);
-    await page.close(); await watch.waitForFunction(() => document.querySelector('#watch-state h1').textContent === '工作台已关闭');
-    assert.equal(await watch.locator('#watch-send').isDisabled(), true);
+  await check('tab switches preserve decoder identity, stream and playback clocks', async () => {
+    const before = await page.locator('#video-A').evaluate(v => { window.originalSource = v; window.originalStream = v.srcObject; return v.currentTime; });
+    for (let i = 0; i < 3; i++) {
+      await page.locator('#studio-tab').click();
+      assert.equal(await page.locator('#watch-view').isVisible(), false);
+      assert.equal(await page.locator('#video-A').evaluate(v => v === window.originalSource && v.srcObject === window.originalStream && !v.paused && v.parentElement.matches('.source-thumbnail')), true);
+      await page.locator('#watch-tab').click();
+      assert.equal(await page.locator('#video-A').evaluate(v => v === window.originalSource && v.srcObject === window.originalStream && v.closest('#watch-decoders') !== null), true);
+    }
+    await page.waitForFunction(t => document.querySelector('#video-A').currentTime > t + .5, before);
+    assert.equal(context.pages().length, 1);
+    await page.locator('#watch-studio').click(); await page.locator('[data-disconnect="B"]').click(); await page.locator('#watch-tab').click();
+    await page.waitForFunction(() => document.querySelector('#watch-send-target option[value="B"]').disabled);
+    await page.locator('#watch-studio').click(); await page.locator('[data-disconnect="A"]').click(); await page.locator('#watch-tab').click();
+    assert.equal(await page.locator('#watch-state').isVisible(), true);
+    await page.locator('#watch-retry').click(); assert.equal(await page.locator('#studio-view').isVisible(), true);
   });
   assert.deepEqual(errors, []); fs.writeFileSync(path.join(artifacts, 'watch-report.json'), JSON.stringify({ passed: results.length, results, errors }, null, 2));
   console.log(JSON.stringify({ passed: results.length, results, errors }, null, 2));

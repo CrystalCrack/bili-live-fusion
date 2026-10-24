@@ -6,8 +6,8 @@ export class OutputServer {
     this.channel = new BroadcastChannel(`fusion-output-${this.token}`);
     this.channel.onmessage = event => this.receive(event.data).catch(error => this.onStatus?.(error.message));
   }
-  open(view = 'output') {
-    const page = view === 'watch' ? 'watch' : 'output';
+  open() {
+    const page = 'output';
     const output = window.open(`${page}.html#${this.token}`, `fusion-${page}-${this.token}`, 'popup,width=1200,height=780');
     if (!output) throw new Error('请允许本页面打开播放窗口');
     this.windows.add(output); output.focus();
@@ -76,7 +76,8 @@ export class OutputServer {
   updateState() { if ([...this.peers.values()].some(peer => peer.view === 'watch')) this.publish('watch-state', { state: this.getState() }); }
   removePeer(id) {
     const peer = this.peers.get(id); if (!peer) return;
-    this.peers.delete(id); clearTimeout(peer.timeout); peer.connection.close(); peer.stream.getVideoTracks().forEach(track => track.stop());
+    this.peers.delete(id); clearTimeout(peer.timeout); peer.connection?.close();
+    peer.stream.getVideoTracks().forEach(track => track.stop());
     if (peer.view === 'watch') this.onWatching?.(this.watching);
   }
   close() {

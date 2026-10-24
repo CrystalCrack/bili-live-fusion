@@ -32,10 +32,14 @@ chrome.runtime.onMessage.addListener((message, sender, respond) => {
     if (sender.id !== chrome.runtime.id || !sender.tab?.id ||
         !/^https:\/\/live\.bilibili\.com\/\d+(?:[/?#]|$)/.test(sender.url || '')) return;
     if (!['danmaku', 'state'].includes(message.event)) return;
-    chrome.runtime.sendMessage({
-      type: 'SOURCE_EVENT', tabId: sender.tab.id,
-      event: message.event, data: message.data
-    }).catch(() => {});
+    (async () => {
+      let data = message.data;
+      if (message.event === 'danmaku' && Array.isArray(data)) {
+        const uid = (await chrome.cookies.get({ url: 'https://www.bilibili.com/', name: 'DedeUserID' }))?.value;
+        data = data.slice(0, 80).map(item => ({ ...item, self: Boolean(uid && String(item?.uid) === uid) }));
+      }
+      await chrome.runtime.sendMessage({ type: 'SOURCE_EVENT', tabId: sender.tab.id, event: message.event, data });
+    })().catch(() => {});
     return;
   }
   if (!isStudio(sender)) return;
