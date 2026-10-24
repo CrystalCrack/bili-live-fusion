@@ -1,6 +1,6 @@
 {
   "name": "three-way-fusion",
-  "version": "0.2.2",
+  "version": "0.3.0",
   "private": true,
   "type": "module",
   "description": "三路融合姬 · 双 Bilibili 直播间融合工作台",
@@ -12,6 +12,7 @@
     "test:browser": "node scripts/browser-smoke.mjs",
     "test:extension": "node scripts/extension-smoke.mjs",
     "test:live": "node scripts/live-smoke.mjs",
+    "test:watch": "node scripts/watch-smoke.mjs",
     "vendor": "node scripts/vendor.mjs"
   },
   "engines": {

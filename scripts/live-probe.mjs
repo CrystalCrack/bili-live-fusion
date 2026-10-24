@@ -7,13 +7,13 @@ import { createRequire } from 'node:module';
 import { fileURLToPath } from 'node:url';
 import { parseRoomId } from '../extension/lib/model.js';
 const room = parseRoomId(process.argv[2]); if (!room) throw new Error('Usage: node scripts/live-probe.mjs ROOM_ID');
-const headed = process.argv.includes('--headed'), checkOutput = process.argv.includes('--output');
+const headed = process.argv.includes('--headed'), checkWatch = process.argv.includes('--watch'), checkOutput = process.argv.includes('--output') || checkWatch;
 const secondRoomOption = process.argv.find(arg => arg.startsWith('--second-room='));
 const secondRoom = secondRoomOption ? parseRoomId(secondRoomOption.slice('--second-room='.length)) : null;
 if (secondRoomOption && !secondRoom) throw new Error('Invalid second room');
 const assignments = secondRoom ? [['A', room], ['B', secondRoom]] : [['A', room]];
 const blockLiveWorker = process.argv.includes('--block-live-worker');
-const artifactName = `live-${assignments.map(([, roomId]) => roomId).join('-')}`;
+const artifactName = `live-${assignments.map(([, roomId]) => roomId).join('-')}${checkWatch ? '-watch' : ''}`;
 const duration = Number(process.argv.find(arg => arg.startsWith('--duration='))?.split('=')[1] || 2);
 assert.ok(Number.isFinite(duration) && duration >= 2 && duration <= 90, 'Duration must be 2–90 seconds');
 const require = createRequire(import.meta.url);
@@ -47,7 +47,7 @@ try {
     let output, outputStart;
     if (checkOutput) {
       await page.locator(`[data-preset="${secondRoom ? 'split' : 'a'}"]`).click();
-      const opened = context.waitForEvent('page'); await page.locator('#live-output-button').click(); output = await opened;
+      const opened = context.waitForEvent('page'); await page.locator(checkWatch ? '#watch-button' : '#live-output-button').click(); output = await opened;
       output.on('pageerror', error => errors.push(error.message));
       await output.waitForFunction(() => { const v = document.querySelector('video'); return v.videoWidth > 0 && v.currentTime > 0 && !v.paused; });
       outputStart = await output.locator('video').evaluate(v => v.currentTime);
@@ -66,6 +66,15 @@ try {
       outputDetail = await output.locator('video').evaluate(v => ({ width: v.videoWidth, height: v.videoHeight,
         time: v.currentTime, paused: v.paused, audioTracks: v.srcObject.getAudioTracks().length, frames: v.getVideoPlaybackQuality().totalVideoFrames }));
       assert.ok(outputDetail.time > outputStart + duration * .6); assert.equal(outputDetail.audioTracks, 1);
+      if (checkWatch) {
+        outputDetail.comments = await output.locator('.watch-comment').count();
+        outputDetail.footer = await output.locator('#watch-send-form').isVisible(); assert.equal(outputDetail.footer, true);
+        if (outputDetail.comments) {
+          const comment = output.locator('.watch-comment').first(); await comment.focus();
+          assert.equal(await comment.evaluate(el => el.getAnimations()[0].playState), 'paused');
+          outputDetail.interaction = await comment.getByRole('button', { name: '复制弹幕', exact: true }).isVisible(); assert.equal(outputDetail.interaction, true);
+        }
+      }
       await output.screenshot({ path: path.join(artifacts, `${artifactName}-output.png`) });
       await output.close(); await page.bringToFront();
     }
@@ -77,7 +86,7 @@ try {
     if (blockLiveWorker) assert.equal(await page.evaluate(() => window.liveWorkerRequests), 0);
     assert.deepEqual(errors, []);
     const report = { timestamp: new Date().toISOString(), version: connection.version, browser: context.browser()?.version(), room, headed, autoplay: 'browser-default', observedSeconds: duration,
-      secondRoom, blockLiveWorker, connected: true, sources: sourceDetails, output: outputDetail, errors, connection };
+      secondRoom, checkWatch, blockLiveWorker, connected: true, sources: sourceDetails, output: outputDetail, errors, connection };
     fs.writeFileSync(path.join(artifacts, `${artifactName}-report.json`), JSON.stringify(report, null, 2));
     console.log(JSON.stringify({ ...report, connection: undefined }, null, 2));
   } catch (error) {

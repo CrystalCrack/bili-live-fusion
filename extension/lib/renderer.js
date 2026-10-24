@@ -5,7 +5,7 @@ export class Compositor {
     this.canvas = canvas; this.ctx = canvas.getContext('2d', { alpha: false });
     this.getScene = getScene; this.getSources = getSources; this.comments = [];
     this.lastDraw = 0; this.frameCount = 0; this.actualFps = 0; this.lastStats = 0;
-    this.running = false; this.timer = null; this.streams = new Set();
+    this.running = false; this.timer = null; this.streams = new Set(); this.cleanStreams = new Set();
   }
   start() {
     if (this.running) return;
@@ -46,12 +46,17 @@ export class Compositor {
       }
       ctx.restore();
     }
+    // Watch pages draw interactive comments above a video without burned-in text.
+    if (this.cleanStreams.size) {
+      if (this.cleanCanvas.width !== w || this.cleanCanvas.height !== h) { this.cleanCanvas.width = w; this.cleanCanvas.height = h; }
+      this.cleanContext.drawImage(this.canvas, 0, 0);
+    }
     this.renderDanmaku(now, scene);
     // requestFrame is available on CanvasCaptureMediaStreamTrack, and keeps a
     // zero-frame-rate capture in step with the selected render FPS.
     for (const stream of this.streams) {
       const track = stream.getVideoTracks()[0];
-      if (track?.readyState === 'live') track.requestFrame?.(); else this.streams.delete(stream);
+      if (track?.readyState === 'live') track.requestFrame?.(); else { this.streams.delete(stream); this.cleanStreams.delete(stream); }
     }
   }
   addDanmaku(item) {
@@ -90,13 +95,18 @@ export class Compositor {
     }
     ctx.restore();
   }
-  createStream(audioTracks = []) {
-    const stream = this.canvas.captureStream(0);
+  createStream(audioTracks = [], { danmaku = true } = {}) {
+    if (!danmaku && !this.cleanCanvas) {
+      this.cleanCanvas = document.createElement('canvas'); this.cleanCanvas.width = this.canvas.width; this.cleanCanvas.height = this.canvas.height;
+      this.cleanContext = this.cleanCanvas.getContext('2d', { alpha: false });
+    }
+    const stream = (danmaku ? this.canvas : this.cleanCanvas).captureStream(0);
+    if (!danmaku) this.cleanStreams.add(stream);
     stream.getVideoTracks()[0].contentHint = 'detail';
     for (const track of audioTracks) stream.addTrack(track);
     this.streams.add(stream); stream.getVideoTracks()[0]?.requestFrame?.();
     return stream;
   }
   clearDanmaku() { this.comments = []; }
-  stop() { clearInterval(this.timer); this.running = false; for (const stream of this.streams) stream.getVideoTracks().forEach(track => track.stop()); this.streams.clear(); }
+  stop() { clearInterval(this.timer); this.running = false; for (const stream of this.streams) stream.getVideoTracks().forEach(track => track.stop()); this.streams.clear(); this.cleanStreams.clear(); }
 }

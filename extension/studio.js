@@ -106,7 +106,7 @@ function saveScene() {
     } catch { $('#save-status').textContent = '保存失败，可导出场景'; }
   }, 400);
 }
-function changed() { mixer.update(scene); saveScene(); }
+function changed() { mixer.update(scene); outputServer?.updateState(); saveScene(); }
 function setValue(selector, value, force = false) {
   const input = $(selector); if (force || document.activeElement !== input) input.value = value;
 }
@@ -138,6 +138,7 @@ function updateInspector() {
 }
 function selectSource(id) { scene.selected = id; updateInspector(); saveScene(); }
 function updateConnected() {
+  outputServer?.updateState();
   let count = 0, demo = false;
   for (const id of CHANNELS) {
     const source = sources[id], stream = source.stream, connected = sourceActive(source);
@@ -376,6 +377,7 @@ function acceptDanmaku(item) {
     if (!filter.accept(item, scene.danmaku)) { filteredCount++; return; }
   } catch (error) { toast(error.message, 'error'); return; }
   compositor.addDanmaku(item);
+  outputServer?.publish('watch-danmaku', { item: { source: item.source, text: String(item.text).slice(0, 300), user: String(item.user || '').slice(0, 60) } });
   const feed = $('#danmaku-feed');
   const stick = feed.scrollHeight - feed.scrollTop - feed.clientHeight < 60;
   feed.querySelector('.feed-empty')?.remove();
@@ -390,6 +392,7 @@ function acceptDanmaku(item) {
   if (stick) feed.scrollTop = feed.scrollHeight;
 }
 function clearDanmaku() {
+  outputServer?.publish('watch-clear');
   compositor.clearDanmaku(); filter = new DanmakuFilter(); filteredCount = 0; $('#danmaku-count').textContent = '0';
   $('#danmaku-feed').replaceChildren();
   const empty = document.createElement('div'); empty.className = 'feed-empty'; empty.textContent = '弹幕已清空，等待新的消息'; $('#danmaku-feed').append(empty);
@@ -418,32 +421,37 @@ function applyFilter() {
   // Recheck visible content immediately when the rule set changes.
   clearDanmaku(); updateFilterIndicator(); changed(); $('#filter-dialog').close(); toast('弹幕规则与样式已应用');
 }
-async function sendDanmaku(event) {
-  event.preventDefault(); if (sendBusy) return;
-  const text = $('#send-text').value.trim(); if (!text) return;
-  const target = $('#send-target').value;
+async function submitDanmaku(text, target) {
+  if (sendBusy) throw new Error('正在发送，请稍候');
+  text = String(text || '').trim();
+  if (!text || [...text].length > 30) throw new Error('弹幕请输入 1–30 个字');
+  if (!['A', 'B', 'both'].includes(target)) throw new Error('请选择发送直播间');
   const ids = target === 'both' ? CHANNELS : [target];
-  const demoIds = ids.filter(id => sources[id].demo);
-  if (demoIds.length) {
-    for (const source of demoIds) acceptDanmaku({ source, text, user: '我 · 演示', uid: 'demo-self', timestamp: Date.now() });
-    if (demoIds.length === ids.length) { $('#send-text').value = ''; toast('演示弹幕已加入画布'); return; }
-  }
   sendBusy = true; $('#send-form button').disabled = true;
   const sentTabIds = new Set(), sentRoomIds = new Set(), errors = [], submitted = [];
-  for (const id of ids.filter(source => !sources[source].demo)) {
-    const tabId = sources[id].tabId;
-    const roomId = sources[id].roomId;
-    if ((roomId && sentRoomIds.has(roomId)) || (!roomId && tabId && sentTabIds.has(tabId))) continue;
-    try {
-      if (roomId) { await request({ type: 'LIVE_SEND_DANMAKU', roomId, text }); sentRoomIds.add(roomId); }
-      else { await roomCommand(id, { type: 'SEND_DANMAKU', text }); if (tabId) sentTabIds.add(tabId); }
-      submitted.push(id);
+  try {
+    for (const id of ids) {
+      const source = sources[id], tabId = source.tabId, roomId = source.roomId;
+      if ((roomId && sentRoomIds.has(roomId)) || (!roomId && tabId && sentTabIds.has(tabId))) continue;
+      try {
+        if (source.demo) acceptDanmaku({ source: id, text, user: '我 · 演示', uid: 'demo-self', timestamp: Date.now() });
+        else if (roomId) { await request({ type: 'LIVE_SEND_DANMAKU', roomId, text }); sentRoomIds.add(roomId); }
+        else if (tabId) { await roomCommand(id, { type: 'SEND_DANMAKU', text }); sentTabIds.add(tabId); }
+        else throw new Error('请先连接直播间');
+        submitted.push(id);
+      } catch (error) { errors.push(`${id}：${error.message}`); }
     }
-    catch (error) { errors.push(`${id}：${error.message}`); }
-  }
-  sendBusy = false; $('#send-form button').disabled = false;
-  if (submitted.length) { $('#send-text').value = ''; toast(`已向直播间 ${submitted.join('、')} 提交弹幕`); }
-  if (errors.length) toast(errors.join('；'), 'error');
+  } finally { sendBusy = false; $('#send-form button').disabled = false; }
+  const success = submitted.length ? `已向 ${submitted.join('、')} 发送弹幕` : '';
+  return { ok: errors.length === 0 && submitted.length > 0, sent: submitted, errors, message: [success, ...errors].filter(Boolean).join('；') };
+}
+async function sendDanmaku(event) {
+  event.preventDefault();
+  try {
+    const result = await submitDanmaku($('#send-text').value, $('#send-target').value);
+    if (result.ok) $('#send-text').value = '';
+    toast(result.message, result.ok ? 'success' : 'error');
+  } catch (error) { toast(error.message, 'error'); }
 }
 function bindTransform() {
   for (const key of ['x', 'y', 'w', 'h']) {
@@ -524,13 +532,20 @@ function downloadBlob(blob, filename) {
 function stamp() { const d = new Date(); return `${d.getFullYear()}${String(d.getMonth() + 1).padStart(2, '0')}${String(d.getDate()).padStart(2, '0')}-${String(d.getHours()).padStart(2, '0')}${String(d.getMinutes()).padStart(2, '0')}${String(d.getSeconds()).padStart(2, '0')}`; }
 function hasSource() { return CHANNELS.some(id => sourceActive(sources[id])); }
 async function outputStream() { await mixer.init(); mixer.update(scene); return compositor.createStream(mixer.outputTracks()); }
-async function openOutput() {
-  if (!hasSource()) { toast('请先采集直播间或开启演示，再打开输出窗口', 'warning'); return; }
+function watchState() {
+  return { danmaku: { ...scene.danmaku }, sources: CHANNELS.map(id => ({ id, room: sources[id].roomId || parseRoomId(scene.sources[id].room) || '', available: Boolean(sources[id].demo || sources[id].roomId || sources[id].tabId) })) };
+}
+async function openOutput(view = 'output') {
+  if (!hasSource()) { toast('请先连接直播间或开启演示，再打开播放窗口', 'warning'); return; }
   try {
     // Open synchronously to retain user activation; the peer requests a stream
     // after its output page is ready.
-    if (!outputServer) outputServer = new OutputServer(() => compositor.createStream(mixer.outputTracks()), message => toast(message, 'error'));
-    outputServer.open(); await mixer.init(); mixer.update(scene);
+    if (!outputServer) outputServer = new OutputServer(view => compositor.createStream(mixer.outputTracks(), { danmaku: view !== 'watch' }), message => toast(message, 'error'), {
+      getState: watchState, onSend: submitDanmaku,
+      onFocus: () => { if (extension) chrome.tabs.getCurrent().then(tab => { if (tab) return chrome.tabs.update(tab.id, { active: true }).then(() => chrome.windows.update(tab.windowId, { focused: true })); }).catch(() => {}); else window.focus(); },
+      onWatching: watching => mixer.setMonitorSuppressed(watching)
+    });
+    outputServer.open(view); await mixer.init(); mixer.update(scene);
   } catch (error) { toast(error.message, 'error'); }
 }
 function lockRecordingSettings(lock) { $('#resolution').disabled = lock; $('#fps').disabled = lock; $('#import-scene').disabled = lock; $('#reset-scene').disabled = lock; }
@@ -638,8 +653,9 @@ function bindEvents() {
   $('#filter-button').addEventListener('click', openFilter); $('#apply-filter').addEventListener('click', applyFilter); $('#clear-danmaku').addEventListener('click', () => { clearDanmaku(); toast('弹幕记录与画布已清空'); });
   for (const key of ['size', 'opacity', 'speed', 'area']) $(`#dm-${key}`).addEventListener('input', event => { $(`#dm-${key}-value`).textContent = `${event.target.value}${key === 'size' ? ' px' : key === 'speed' ? ' s' : '%'}`; });
   $('#send-form').addEventListener('submit', sendDanmaku);
-  $('#output-button').addEventListener('click', openOutput);
-  $('#live-output-button').addEventListener('click', openOutput);
+  $('#watch-button').addEventListener('click', () => openOutput('watch'));
+  $('#output-button').addEventListener('click', () => openOutput());
+  $('#live-output-button').addEventListener('click', () => openOutput());
   $('#fullscreen-button').addEventListener('click', async () => { try { if (document.fullscreenElement) await document.exitFullscreen(); else await $('#canvas-stage').requestFullscreen(); } catch (error) { toast(error.message, 'error'); } });
   $('#resolution').addEventListener('change', event => { scene.resolution = event.target.value; syncScene(); changed(); });
   $('#fps').addEventListener('change', event => { scene.fps = Number(event.target.value); syncScene(); changed(); });

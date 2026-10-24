@@ -5,7 +5,7 @@ export class AudioMixer {
   constructor() {
     this.context = null; this.tracks = new Map(); this.master = null;
     this.destination = null; this.monitor = null; this.limiter = null;
-    this.elements = new WeakMap();
+    this.elements = new WeakMap(); this.monitorSuppressed = false; this.monitorEnabled = false;
   }
   prepare() {
     if (!this.context) {
@@ -69,7 +69,8 @@ export class AudioMixer {
     if (!this.context) return;
     const now = this.context.currentTime;
     this.master.gain.setTargetAtTime(scene.audio.master / 100, now, 0.02);
-    this.monitor.gain.setTargetAtTime(scene.audio.monitor ? 1 : 0, now, 0.02);
+    this.monitorEnabled = scene.audio.monitor;
+    this.monitor.gain.setTargetAtTime(scene.audio.monitor && !this.monitorSuppressed ? 1 : 0, now, 0.02);
     for (const id of CHANNELS) {
       const track = this.tracks.get(id); if (!track) continue;
       const settings = scene.sources[id];
@@ -84,6 +85,10 @@ export class AudioMixer {
         track.voice = settings.voice;
       }
     }
+  }
+  setMonitorSuppressed(value) {
+    this.monitorSuppressed = value;
+    this.monitor?.gain.setTargetAtTime(this.monitorEnabled && !value ? 1 : 0, this.context.currentTime, 0.02);
   }
   level(id) {
     const track = this.tracks.get(id); if (!track) return { percent: 0, db: -Infinity };
