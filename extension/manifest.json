@@ -1,0 +1,18 @@
+{
+  "manifest_version": 3,
+  "name": "三路融合姬",
+  "version": "0.1.0",
+  "description": "把两个 Bilibili 直播间的画面、声音和弹幕，编排进同一块画布。",
+  "minimum_chrome_version": "116",
+  "permissions": ["storage"],
+  "host_permissions": ["https://live.bilibili.com/*"],
+  "background": { "service_worker": "background.js", "type": "module" },
+  "action": { "default_title": "打开三路融合姬" },
+  "icons": { "16": "assets/icon-16.png", "48": "assets/icon-48.png", "128": "assets/icon-128.png" },
+  "content_scripts": [{
+    "matches": ["https://live.bilibili.com/*"],
+    "js": ["content.js"],
+    "run_at": "document_idle"
+  }],
+  "content_security_policy": { "extension_pages": "script-src 'self'; object-src 'none'; base-uri 'self'" }
+}
