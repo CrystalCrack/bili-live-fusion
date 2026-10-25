@@ -6,7 +6,7 @@ import vm from 'node:vm';
 const source = fs.readFileSync(new URL('../extension/native-player.js', import.meta.url), 'utf8');
 function fixture() {
   const listeners = new Map(), messages = [], tracks = [];
-  let current, observer, peer; const timers = new Map(); let timer = 0;
+  let current, observer, peer, playError = null; const timers = new Map(); let timer = 0;
   class Element extends EventTarget {
     constructor() { super(); this.attributes = new Map(); }
     getAttribute(name) { return this.attributes.get(String(name).toLowerCase()) ?? null; }
@@ -23,7 +23,7 @@ function fixture() {
     get currentTime() { return this.position; } set currentTime(value) { this.position = value; }
     get playbackRate() { return this.rate; } set playbackRate(value) { this.rate = value; }
     load() { this.loads++; }
-    async play() { this.paused = false; } pause() { this.paused = true; }
+    async play() { this.playCalls = (this.playCalls || 0) + 1; if (playError) throw playError; this.paused = false; } pause() { this.paused = true; }
   }
   class Peer {
     constructor(config) { peer = this; this.config = config; this.candidates = []; }
@@ -47,12 +47,69 @@ function fixture() {
   const start = () => listeners.get('message')({ source: window, origin: location.origin, ports: [port], data: { type: 'BILI_FUSION_NATIVE_INIT', token: '12345678-1234-1234-1234-123456789abc' } });
   const receive = data => port.onmessage({ data });
   return { Media, Element, original, messages, tracks, port, start, receive, timers, get peer() { return peer; },
+    set playError(value) { playError = value; },
+    user(action, options = {}) {
+      const event = { type: 'click', isTrusted: true, eventPhase: 1, target: current, ...options };
+      listeners.get(event.type)(event); event.eventPhase = 3;
+      try { return action(); } finally { event.eventPhase = 0; }
+    },
+    browserPause() { current.paused = true; current.dispatchEvent(new Event('pause')); },
     ready() { receive({ type: 'stream-ready' }); },
     track(kind, muted = false) { const track = new EventTarget(); Object.assign(track, { kind, muted, stop() { this.stopped = true; } }); tracks.push(track); peer.ontrack({ track }); return track; },
     replace(video) { current = video; observer(); }
   };
 }
 const flush = () => new Promise(resolve => setImmediate(resolve));
+
+test('applying fusion starts playback even when the original SDK left the video paused', async () => {
+  const f = fixture(); f.original.paused = true;
+  f.start(); f.ready(); f.track('video'); await flush();
+  assert.equal(f.original.paused, false);
+  assert.ok(f.messages.some(message => message.type === 'attached'));
+  [...f.timers.values()][0](); const health = f.messages.at(-1).data;
+  assert.equal(health.wantPlaying, true); assert.equal(health.paused, false); assert.equal(health.playBlocked, false);
+});
+
+test('SDK pause calls are blocked while real playback controls preserve user intent', async () => {
+  const f = fixture(), video = f.original, cachedPause = f.Media.prototype.pause;
+  f.start(); f.ready(); f.track('video'); await flush();
+  for (let i = 0; i < 5; i++) cachedPause.call(video);
+  assert.equal(video.paused, false);
+  [...f.timers.values()][0](); assert.equal(f.messages.at(-1).data.blocked.pause, 5);
+  f.user(() => video.pause()); assert.equal(video.paused, true);
+  assert.equal(f.messages.at(-1).state, 'paused');
+  await video.play(); assert.equal(video.paused, true, 'Background SDK play cannot undo an explicit user pause');
+  [...f.timers.values()][0](); assert.equal(video.paused, true);
+  await f.user(() => video.play(), { type: 'keydown', code: 'Space', key: ' ' });
+  assert.equal(video.paused, false);
+  assert.equal(f.messages.at(-1).state, 'playing');
+});
+
+test('browser pause events recover only when playback is wanted and do not fight a user pause', async () => {
+  const f = fixture(); f.start(); f.ready(); f.track('video'); await flush();
+  f.browserPause(); await flush(); assert.equal(f.original.paused, false);
+  f.user(() => f.original.pause()); f.browserPause(); await flush();
+  assert.equal(f.original.paused, true);
+  f.replace(new f.Media()); assert.equal(f.original.srcObject, null);
+  [...f.timers.values()][0](); assert.equal(f.messages.at(-1).data.wantPlaying, false);
+  assert.equal(f.messages.at(-1).data.paused, true);
+});
+
+test('loaded first frame never announces playing while autoplay is blocked', async () => {
+  const f = fixture(); f.original.paused = true;
+  f.playError = Object.assign(new Error('gesture needed'), { name: 'NotAllowedError' });
+  f.start(); f.ready(); f.track('video'); f.original.dispatchEvent(new Event('loadeddata')); await flush();
+  assert.equal(f.messages.some(message => message.type === 'attached'), false);
+  assert.equal(f.messages.at(-1).type, 'play-needed');
+  const attempts = f.original.playCalls;
+  [...f.timers.values()][0](); [...f.timers.values()][0]();
+  assert.equal(f.original.playCalls, attempts, 'Autoplay rejection waits for the user instead of looping');
+  assert.equal(f.messages.at(-1).data.playBlocked, true);
+  assert.equal(f.messages.at(-1).data.lastPlayError.name, 'NotAllowedError');
+  f.playError = null; await f.user(() => f.original.play());
+  assert.equal(f.original.paused, false); assert.ok(f.messages.some(message => message.type === 'attached'));
+  assert.equal(f.messages.at(-1).state, 'playing');
+});
 
 test('native playback exchanges only cloneable SDP/ICE and waits for a live video track', async () => {
   const f = fixture(); f.start();
@@ -69,14 +126,14 @@ test('native playback exchanges only cloneable SDP/ICE and waits for a live vide
   assert.equal(f.original.srcObject, null, 'Keep original live until a received video frame is available');
   track.muted = false; track.dispatchEvent(new Event('unmute'));
   assert.equal(f.original.srcObject.getTracks().length, 2);
-  f.original.dispatchEvent(new Event('loadeddata')); assert.equal(f.messages.at(-1).type, 'attached');
+  f.original.dispatchEvent(new Event('loadeddata')); await flush(); assert.ok(f.messages.some(message => message.type === 'attached'));
 });
 
 test('native stream preserves playback controls and restores the original video exactly once', async () => {
   const f = fixture(), video = f.original;
   f.start(); f.track('video'); f.track('audio'); f.ready(); const stream = video.srcObject;
   assert.equal(stream.getTracks().length, 2); assert.equal(video.volume, .7); assert.equal(video.muted, false);
-  video.pause(); assert.equal(video.paused, true); await video.play(); assert.equal(video.paused, false);
+  f.user(() => video.pause()); assert.equal(video.paused, true); await f.user(() => video.play()); assert.equal(video.paused, false);
   video.volume = .25; video.muted = true;
   video.srcObject = null; video.load(); video.currentTime = 99; video.playbackRate = 1.2;
   assert.equal(video.srcObject, stream); assert.equal(video.loads, 0); assert.equal(video.currentTime, 18);
@@ -85,7 +142,7 @@ test('native stream preserves playback controls and restores the original video 
   assert.equal(video.playbackRate, 1.2); assert.equal(f.timers.size, 0);
   assert.equal(video.volume, .25); assert.equal(video.muted, true); assert.ok(f.tracks.every(track => track.stopped));
   video.currentTime = 22; assert.equal(video.currentTime, 22);
-  for (const name of ['srcObject', 'src', 'load', 'currentTime', 'playbackRate']) assert.equal(Object.hasOwn(video, name), false);
+  for (const name of ['srcObject', 'src', 'load', 'play', 'pause', 'currentTime', 'playbackRate']) assert.equal(Object.hasOwn(video, name), false);
 });
 
 test('site source resets and cached prototype operations cannot restart the fused video', () => {
@@ -102,18 +159,18 @@ test('site source resets and cached prototype operations cannot restart the fuse
   [...f.timers.values()][0](); const health = f.messages.at(-1);
   assert.equal(health.type, 'native-health'); assert.equal(health.data.sourceMatches, true);
   assert.equal(health.data.blocked.src, 7); assert.equal(health.data.blocked.load, 1); assert.equal(health.data.blocked.srcObject, 1);
-  video.pause(); f.receive({ type: 'close' });
+  f.user(() => video.pause()); f.receive({ type: 'close' });
   assert.equal(video.srcObject, null); assert.equal(video.src, 'blob:latest'); assert.equal(video.paused, true);
   assert.equal(Object.hasOwn(video, 'src'), false);
   video.src = 'blob:after'; assert.equal(video.src, 'blob:after');
 });
 
-test('native player replacement rebinds the same fusion stream and restores both elements', () => {
+test('native player replacement rebinds the same fusion stream and carries user playback intent', () => {
   const f = fixture(); f.start(); f.ready(); f.track('video');
   const stream = f.original.srcObject, next = new f.Media(); next.paused = true;
   f.replace(next);
-  assert.equal(f.original.srcObject, null); assert.equal(next.srcObject, stream); assert.equal(next.paused, true);
-  f.receive({ type: 'close' }); assert.equal(next.srcObject, null); assert.equal(next.paused, true);
+  assert.equal(f.original.srcObject, null); assert.equal(next.srcObject, stream); assert.equal(next.paused, false);
+  f.user(() => next.pause()); f.receive({ type: 'close' }); assert.equal(next.srcObject, null); assert.equal(next.paused, true);
 });
 
 test('transport failure restores the original stream and ignores late tracks and readiness', () => {

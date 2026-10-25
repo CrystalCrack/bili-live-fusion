@@ -49,9 +49,10 @@
       if (active !== state || state.failed) return; const data = event.data;
       if (data?.type === 'native-health') { state.nativeHealth = data.data; return; }
       if (['ready', 'answer', 'candidate'].includes(data?.type)) state.producer.postMessage(data);
-      else if (data?.type === 'attached') { state.attached = true; state.status = 'playing'; state.text = '已接入 B 站原生播放器'; clearTimeout(state.timeout); notifyStudio(true); state.producer.postMessage(data); showProcessor(state, state.audioNeeded); }
+      else if (data?.type === 'attached') { state.attached = true; state.playback = 'playing'; state.status = 'playing'; state.text = '已接入 B 站原生播放器'; clearTimeout(state.timeout); notifyStudio(true); state.producer.postMessage(data); showProcessor(state, state.audioNeeded); }
+      else if (data?.type === 'playback-state') { state.playback = data.state; state.status = data.state; state.text = data.text; state.producer.postMessage(data); }
       else if (data?.type === 'error') fail(state, data.text);
-      else if (data?.type === 'play-needed') { state.text = data.text; state.producer.postMessage(data); showProcessor(state, true); }
+      else if (data?.type === 'play-needed') { state.playback = 'blocked'; state.status = 'blocked'; state.text = data.text; clearTimeout(state.timeout); state.producer.postMessage(data); showProcessor(state, true); }
     };
     state.producer.onmessage = event => {
       if (active !== state) return; const data = event.data;
@@ -61,7 +62,7 @@
       if (['offer', 'candidate', 'stream-ready'].includes(data?.type)) state.native.postMessage(data);
       else if (data?.type === 'state') {
         if (data.error) { fail(state, data.text, false); return; }
-        state.text = data.text; state.audioNeeded = data.audioNeeded === true; state.status = state.attached ? 'playing' : 'connecting'; showProcessor(state, !state.attached || state.audioNeeded);
+        state.text = data.text; state.audioNeeded = data.audioNeeded === true; state.status = state.playback || 'connecting'; showProcessor(state, !state.attached || state.audioNeeded || state.playback === 'blocked');
       }
     };
     state.native.start(); state.producer.start();

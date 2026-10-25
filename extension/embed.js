@@ -11,10 +11,11 @@ import { authorizeEmbed } from './lib/embed-startup.js';
 const token = location.hash.slice(1), label = document.querySelector('#state');
 const mixer = new AudioMixer(), session = new LiveSession();
 const sources = Object.fromEntries(CHANNELS.map(id => { const video = document.createElement('video'); video.playsInline = true; video.crossOrigin = 'anonymous'; video.muted = true; document.querySelector('#sources').append(video); return [id, { video }]; }));
-let scene, compositor, link, port, closed = false, failed = false, audioNeeded = true, attached = false, giveReady, healthTimer;
+let scene, compositor, link, port, closed = false, failed = false, audioNeeded = true, attached = false, giveReady, healthTimer, playback = 'connecting';
 const receiverReady = new Promise(resolve => { giveReady = resolve; });
 function send(data) { if (!closed) port?.postMessage(data); }
 function status(text, error = false) { label.textContent = text; send({ type: 'state', text, error, audioNeeded }); }
+function playbackText() { return playback === 'paused' ? '融合直播已暂停' : playback === 'buffering' ? '融合画面正在缓冲' : playback === 'blocked' ? '点击 B 站播放按钮启动融合直播' : attached ? '融合直播已接入原生播放器' : '正在接入融合直播'; }
 function stopMedia() {
   clearInterval(healthTimer);
   link?.close(); compositor?.close();
@@ -28,7 +29,7 @@ function fail(error) {
 }
 async function activateAudio() {
   if (closed || failed) return;
-  try { await mixer.init(); if (closed || failed) return; for (const source of Object.values(sources)) source.video.muted = false; audioNeeded = false; document.querySelector('#audio').hidden = true; status(attached ? '融合直播已接入原生播放器' : '正在接入融合直播'); }
+  try { await mixer.init(); if (closed || failed) return; for (const source of Object.values(sources)) source.video.muted = false; audioNeeded = false; document.querySelector('#audio').hidden = true; status(playbackText()); }
   catch { if (closed || failed) return; audioNeeded = true; document.querySelector('#audio').hidden = false; status('点击开启声音，音量使用 B 站控制栏调整'); }
 }
 async function start() {
@@ -82,9 +83,10 @@ window.addEventListener('message', event => {
     if (failed) return;
     if (data?.type === 'ready') { giveReady(); return; }
     if (data?.type === 'answer' || data?.type === 'candidate') { link?.receive(data); return; }
-    if (data?.type === 'attached') { attached = true; status(audioNeeded ? '点击开启声音，音量使用 B 站控制栏调整' : '融合直播已接入原生播放器'); return; }
+    if (data?.type === 'attached') { attached = true; playback = 'playing'; status(audioNeeded ? '点击开启声音，音量使用 B 站控制栏调整' : playbackText()); return; }
+    if (data?.type === 'playback-state') { playback = data.state; status(audioNeeded && playback === 'playing' ? '点击开启声音，音量使用 B 站控制栏调整' : data.text); return; }
     if (data?.type === 'error') { fail(new Error(data.text)); return; }
-    if (data?.type === 'play-needed') status(data.text);
+    if (data?.type === 'play-needed') { playback = 'blocked'; status(data.text); }
   };
   port.start(); start();
 });
