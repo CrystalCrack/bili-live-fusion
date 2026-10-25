@@ -7,7 +7,8 @@
     current?.close();
     const token = event.data.token, port = event.ports[0];
     const host = document.querySelector('[data-bili-fusion-host="' + token + '"]');
-    let stream, binding, video, closed = false, observer, started = false;
+    let stream, peer, binding, video, closed = false, failed = false, observer, started = false;
+    let pending = Promise.resolve(); const candidates = [];
     const send = data => { if (!closed) port.postMessage(data); };
     const source = Object.getOwnPropertyDescriptor(HTMLMediaElement.prototype, 'srcObject');
     const time = Object.getOwnPropertyDescriptor(HTMLMediaElement.prototype, 'currentTime');
@@ -23,33 +24,57 @@
     }
     function attach() {
       const next = host && [...host.querySelectorAll('video')].sort((a, b) => b.clientWidth * b.clientHeight - a.clientWidth * a.clientHeight)[0];
-      if (!started || !next || next === video && binding) return;
+      if (closed || failed || !started || !stream?.getVideoTracks().some(track => !track.muted) || !next || next === video && binding) return;
       release(false); video = next;
       binding = { video, previous: source.get.call(video), srcObject: Object.getOwnPropertyDescriptor(video, 'srcObject'), load: Object.getOwnPropertyDescriptor(video, 'load'), currentTime: Object.getOwnPropertyDescriptor(video, 'currentTime'), paused: video.paused };
       const saved = binding;
-      saved.ready = () => { if (binding === saved && !closed) send({ type: 'attached' }); };
+      saved.ready = () => { if (binding === saved && !closed && !failed) send({ type: 'attached' }); };
       video.addEventListener('loadeddata', saved.ready, { once: true }); video.addEventListener('playing', saved.ready, { once: true });
       source.set.call(video, stream);
       Object.defineProperty(video, 'srcObject', { configurable: true, get: () => stream, set() {} });
       Object.defineProperty(video, 'load', { configurable: true, writable: true, value() {} });
       Object.defineProperty(video, 'currentTime', { configurable: true, get: () => time.get.call(video), set() {} });
-      if (!binding.paused) video.play().catch(() => send({ type: 'play-needed', text: '点击 B 站播放按钮继续播放' }));
+      if (!binding.paused) video.play().catch(() => { if (binding === saved && !failed) send({ type: 'play-needed', text: '点击 B 站播放按钮继续播放' }); });
     }
-    const state = { close() { if (closed) return; closed = true; observer?.disconnect(); release(); stream?.getTracks().forEach(track => track.stop()); port.close(); if (current === state) current = null; } }; current = state;
+    function stopMedia() { observer?.disconnect(); peer?.close(); release(); stream?.getTracks().forEach(track => track.stop()); candidates.length = 0; }
+    function fail(error) { if (closed || failed) return; failed = true; send({ type: 'error', text: '原生播放器连接失败：' + error.message }); stopMedia(); }
+    const state = { close() { if (closed) return; closed = true; stopMedia(); port.close(); if (current === state) current = null; } }; current = state;
     port.onmessage = event => {
       const data = event.data;
       if (data?.type === 'close') { state.close(); return; }
-      if (data?.type === 'stream-ready') { started = true; try { attach(); } catch (error) { send({ type: 'error', text: error.message }); } }
+      if (closed || failed) return;
+      if (data?.type === 'failed') { failed = true; stopMedia(); return; }
+      if (data?.type === 'stream-ready') { started = true; try { attach(); } catch (error) { fail(error); } return; }
+      if (data?.type !== 'offer' && data?.type !== 'candidate') return;
+      pending = pending.then(async () => {
+        if (closed || failed) return;
+        if (data.type === 'offer') {
+          await peer.setRemoteDescription({ type: 'offer', sdp: data.sdp });
+          if (closed || failed) return;
+          for (const candidate of candidates.splice(0)) await peer.addIceCandidate(candidate);
+          await peer.setLocalDescription(await peer.createAnswer());
+          if (closed || failed) return;
+          send({ type: 'answer', sdp: peer.localDescription.sdp });
+        } else if (peer.remoteDescription) await peer.addIceCandidate(data.candidate);
+        else candidates.push(data.candidate);
+      }).catch(fail);
     };
     port.start();
     try {
-      if (!globalThis.MediaStreamTrackGenerator) throw new Error('请更新 Edge 后使用网页融合');
+      if (!globalThis.RTCPeerConnection) throw new Error('请更新 Edge 后使用网页融合');
       if (!host) throw new Error('原生播放器已变化，请重新应用场景');
-      const video = new MediaStreamTrackGenerator({ kind: 'video' }), audio = new MediaStreamTrackGenerator({ kind: 'audio' });
-      video.contentHint = 'detail'; stream = new MediaStream([video, audio]);
-      observer = new MutationObserver(() => { try { attach(); } catch (error) { send({ type: 'error', text: error.message }); } }); observer.observe(host, { childList: true, subtree: true });
-      port.postMessage({ type: 'sinks', video: video.writable, audio: audio.writable }, [video.writable, audio.writable]);
-    } catch (error) { send({ type: 'error', text: error.message }); }
+      stream = new MediaStream(); peer = new RTCPeerConnection({ iceServers: [] });
+      peer.onicecandidate = event => { if (!closed && !failed && event.candidate) send({ type: 'candidate', candidate: event.candidate.toJSON() }); };
+      peer.onconnectionstatechange = () => { if (peer.connectionState === 'failed') fail(new Error('本机音视频连接已中断，请重新应用场景')); };
+      peer.ontrack = event => {
+        if (closed || failed) { event.track.stop(); return; }
+        if (!stream.getTracks().includes(event.track)) stream.addTrack(event.track);
+        const ready = () => { try { attach(); } catch (error) { fail(error); } };
+        event.track.addEventListener('unmute', ready, { once: true }); ready();
+      };
+      observer = new MutationObserver(() => { try { attach(); } catch (error) { fail(error); } }); observer.observe(host, { childList: true, subtree: true });
+      send({ type: 'ready' });
+    } catch (error) { fail(error); }
   });
   window.addEventListener('pagehide', () => current?.close());
 })();
