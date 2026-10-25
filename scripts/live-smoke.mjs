@@ -140,7 +140,7 @@ try {
   console.log('PASS continuous real-time composed output with video and mixed audio');
   await output.close(); await page.bringToFront();
   await context.addCookies([{ name: 'bili_jct', value: 'watch-fixture-csrf', domain: '.bilibili.com', path: '/', secure: true, sameSite: 'None' }]);
-  await page.locator('#watch-button').click(); const watch = page;
+  await page.locator('#watch-tab').click(); const watch = page;
   watch.on('pageerror', error => errors.push(error.message));
   await watch.waitForFunction(() => document.querySelector('#watch-player')?.classList.contains('direct') && document.querySelector('#watch-canvas').width > 0 && document.querySelector('#watch-state').hidden);
   sockets.get('67890').send(Buffer.from(packet(5, JSON.stringify({ cmd: 'DANMU_MSG', info: [[], '观看页真实链路弹幕', [52, '测试观众']] }), 0)));

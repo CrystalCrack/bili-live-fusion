@@ -78,7 +78,7 @@ try {
     await page.waitForFunction(() => document.querySelector('#danmaku-feed').textContent.includes('浏览器测试弹幕'));
   });
   await check('output receives live composed video and mixed audio over local WebRTC', async () => {
-    const outputPromise = page.waitForEvent('popup'); await page.locator('#output-button').click(); const output = await outputPromise;
+    const outputPromise = page.waitForEvent('popup'); await page.locator('#live-output-button').click(); const output = await outputPromise;
     output.on('pageerror', error => errors.push(`output: ${error.message}`));
     await output.waitForFunction(() => { const v = document.querySelector('#output-video'); return v?.readyState >= 2 && v.videoWidth === 1920 && v.srcObject?.getAudioTracks().length === 1; }, null, { timeout: 25000 });
     const initialFrames = await output.locator('#output-video').evaluate(video => video.getVideoPlaybackQuality().totalVideoFrames);

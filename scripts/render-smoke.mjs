@@ -18,7 +18,7 @@ try {
   await page.waitForFunction(() => document.querySelector('#source-count').textContent.includes('2 / 2'));
   await page.locator('[data-preset=a]').click();
   await page.waitForFunction(() => JSON.parse(localStorage.getItem('fusion-scene-v1') || 'null')?.layout === 'a');
-  await page.locator('#watch-button').click(); const watch = page;
+  await page.locator('#watch-tab').click(); const watch = page;
   await watch.waitForFunction(() => document.querySelector('#watch-state').hidden && Number(document.querySelector('#watch-canvas').dataset.frames) > 10);
   await check('viewer shares source decoders without encoded video', async () => {
     assert.equal(await watch.locator('#watch-player').evaluate(el => el.classList.contains('direct')), true);

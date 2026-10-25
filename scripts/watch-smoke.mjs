@@ -30,7 +30,7 @@ try {
   await page.waitForFunction(() => document.querySelector('#source-count').textContent === '2 / 2 已接入');
   await page.locator('#filter-button').click(); await page.locator('label').filter({ has: page.locator('#filter-dedupe') }).click(); await page.locator('#apply-filter').click();
   await check('watch page receives advancing live video and mixed audio', async () => {
-    await page.locator('#watch-button').click(); watch = page;
+    await page.locator('#watch-tab').click(); watch = page;
     await watch.waitForFunction(() => document.querySelector('#watch-player')?.classList.contains('direct') && document.querySelector('#watch-canvas').width > 0 && document.querySelector('#watch-state').hidden);
     assert.equal(context.pages().length, 1);
     assert.equal(await page.locator('#studio-view').isVisible(), false);
@@ -147,11 +147,11 @@ try {
     }
     await page.waitForFunction(t => document.querySelector('#video-A').currentTime > t + .5, before);
     assert.equal(context.pages().length, 1);
-    await page.locator('#watch-studio').click(); await page.locator('[data-disconnect="B"]').click(); await page.locator('#watch-tab').click();
+    await page.locator('#studio-tab').click(); await page.locator('[data-disconnect="B"]').click(); await page.locator('#watch-tab').click();
     await page.waitForFunction(() => document.querySelector('#watch-send-target option[value="B"]').disabled);
-    await page.locator('#watch-studio').click(); await page.locator('[data-disconnect="A"]').click(); await page.locator('#watch-tab').click();
+    await page.locator('#studio-tab').click(); await page.locator('[data-disconnect="A"]').click(); await page.locator('#watch-tab').click();
     assert.equal(await page.locator('#watch-state').isVisible(), true);
-    await page.locator('#watch-retry').click(); assert.equal(await page.locator('#studio-view').isVisible(), true);
+    await page.locator('#studio-tab').click(); assert.equal(await page.locator('#studio-view').isVisible(), true);
   });
   assert.deepEqual(errors, []); fs.writeFileSync(path.join(artifacts, 'watch-report.json'), JSON.stringify({ passed: results.length, results, errors }, null, 2));
   console.log(JSON.stringify({ passed: results.length, results, errors }, null, 2));

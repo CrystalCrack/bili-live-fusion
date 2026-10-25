@@ -2,7 +2,7 @@ import { WatchDanmaku } from './lib/watch-danmaku.js';
 import { LiveSurface } from './lib/live-surface.js';
 
 export class WatchView {
-  constructor(player, { read, getState, getAudio, onSend, onStudio }) {
+  constructor(player, { read, getState, getAudio, onSend }) {
     this.player = player; this.read = read; this.getState = getState; this.getAudio = getAudio; this.onSend = onSend;
     this.$ = selector => player.querySelector(selector);
     const $ = this.$; this.video = $('#watch-video'); this.video.volume = .8; this.video.muted = false;
@@ -18,7 +18,6 @@ export class WatchView {
     this.video.addEventListener('volumechange', () => this.updateAudio());
     $('#watch-toggle-danmaku').addEventListener('click', () => { this.danmakuEnabled = !this.danmakuEnabled; this.comments.setEnabled(this.danmakuEnabled); $('#watch-toggle-danmaku').textContent = '弹幕 ' + (this.danmakuEnabled ? '开' : '关'); $('#watch-toggle-danmaku').setAttribute('aria-pressed', String(this.danmakuEnabled)); });
     $('#watch-fullscreen').addEventListener('click', () => this.fullscreen());
-    for (const id of ['#watch-studio', '#watch-retry']) $(id).addEventListener('click', onStudio);
     $('#watch-send-text').addEventListener('input', () => this.updateSend()); $('#watch-send-target').addEventListener('change', () => this.updateSend());
     $('#watch-send-form').addEventListener('submit', async event => { event.preventDefault(); const input = $('#watch-send-text'), text = input.value; if (await this.sendDanmaku(text, $('#watch-send-target').value)) { if (input.value === text) input.value = ''; this.updateSend(); } });
     document.addEventListener('fullscreenchange', () => { if (!this.active) return; const active = document.fullscreenElement === player; $('#watch-fullscreen').textContent = active ? '退出全屏' : '全屏'; $('#watch-fullscreen').setAttribute('aria-pressed', String(active)); this.fit(); this.showControls(); });

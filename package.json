@@ -1,6 +1,6 @@
 {
   "name": "three-way-fusion",
-  "version": "0.3.2",
+  "version": "0.3.3",
   "private": true,
   "type": "module",
   "description": "三路融合姬 · 双 Bilibili 直播间融合工作台",

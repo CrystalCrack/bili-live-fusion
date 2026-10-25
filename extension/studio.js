@@ -486,11 +486,11 @@ function updateStudioSend() {
   $('#send-text').setAttribute('aria-invalid', String(count > 30));
 }
 function jumpToSection(name) {
-  const targets = { sources: '#sources-section', layout: '#layout-section', audio: '#audio-section', danmaku: '#danmaku-section' };
+  const targets = { layout: '#layout-section', audio: '#audio-section', danmaku: '#danmaku-section', output: '#output-settings' };
   const target = $(targets[name]); if (!target) return;
   target.scrollIntoView({ behavior: matchMedia('(prefers-reduced-motion: reduce)').matches ? 'instant' : 'smooth', block: 'start' });
   target.classList.add('jump-highlight'); setTimeout(() => target.classList.remove('jump-highlight'), 1300);
-  const focus = name === 'sources' ? $('#room-' + (sourceActive(sources.A) ? 'B' : 'A')) : target.querySelector('button, input, select');
+  const focus = target.querySelector('button, input, select');
   focus?.focus({ preventScroll: true });
 }
 function bindTransform() {
@@ -658,7 +658,6 @@ async function importScene(file) {
 function bindEvents() {
   $$('[data-jump]').forEach(button => button.addEventListener('click', () => jumpToSection(button.dataset.jump)));
   $$('[data-edit-source]').forEach(button => button.addEventListener('click', () => selectSource(button.dataset.editSource)));
-  $('#workflow-watch').addEventListener('click', () => switchView('watch'));
   $('#connect-all').addEventListener('click', () => {
     const ids = CHANNELS.filter(id => !sourceActive(sources[id]) && !sources[id].pending && parseRoomId(scene.sources[id].room));
     for (const id of ids) connectLive(id);
@@ -697,7 +696,7 @@ function bindEvents() {
     const now = Date.now(); for (const id of CHANNELS) sources[id].player?.synchronize(true, now); saveScene();
   });
   $('#sync-now').addEventListener('click', () => { const now = Date.now(); for (const id of CHANNELS) sources[id].player?.synchronize(true, now); toast('两路直播已按当前对轴设置重新对齐'); });
-  $('#demo-button').addEventListener('click', startDemo); $('#empty-demo').addEventListener('click', startDemo);
+  $('#demo-button').addEventListener('click', startDemo);
   $$('[data-preset]').forEach(button => button.addEventListener('click', () => {
     const preset = button.dataset.preset;
     if (preset === 'custom') scene.layout = 'custom'; else applyPreset(scene, preset);
@@ -718,10 +717,8 @@ function bindEvents() {
   $('#filter-button').addEventListener('click', openFilter); $('#apply-filter').addEventListener('click', applyFilter); $('#clear-danmaku').addEventListener('click', () => { clearDanmaku(); toast('弹幕记录与画布已清空'); });
   for (const key of ['size', 'opacity', 'speed', 'area']) $(`#dm-${key}`).addEventListener('input', event => { $(`#dm-${key}-value`).textContent = `${event.target.value}${key === 'size' ? ' px' : key === 'speed' ? ' s' : '%'}`; });
   $('#send-form').addEventListener('submit', sendDanmaku);
-  $('#watch-button').addEventListener('click', () => switchView('watch'));
   $('#watch-tab').addEventListener('click', () => switchView('watch'));
   $('#studio-tab').addEventListener('click', () => switchView('studio'));
-  $('#output-button').addEventListener('click', () => openOutput());
   $('#live-output-button').addEventListener('click', () => openOutput());
   $('#fullscreen-button').addEventListener('click', async () => { try { if (document.fullscreenElement) await document.exitFullscreen(); else await $('#canvas-stage').requestFullscreen(); } catch (error) { toast(error.message, 'error'); } });
   $('#resolution').addEventListener('change', event => { scene.resolution = event.target.value; syncScene(); changed(); });
@@ -735,7 +732,7 @@ function bindEvents() {
   });
   $('#crop-full').addEventListener('click', () => cropEditor.reset());
   $('#crop-apply').addEventListener('click', () => cropEditor.apply());
-  for (const selector of ['#help-button', '#rail-help', '#footer-help']) $(selector).addEventListener('click', () => $('#help-dialog').showModal());
+  $('#help-button').addEventListener('click', () => $('#help-dialog').showModal());
   $('#connection-button').addEventListener('click', () => { showConnectionInfo(); $('#connection-dialog').showModal(); });
   $('#refresh-connection-info').addEventListener('click', showConnectionInfo);
   $('#copy-connection-info').addEventListener('click', async () => {
@@ -744,7 +741,6 @@ function bindEvents() {
     catch { toast('请在连接信息中选中文字复制', 'warning'); }
   });
   $('#scene-button').addEventListener('click', () => $('#scene-dialog').showModal());
-  $('#settings-button').addEventListener('click', () => { switchView('studio'); $('#output-settings').scrollIntoView({ behavior: 'smooth', block: 'center' }); $('#resolution').focus({ preventScroll: true }); });
   $('#scene-name').addEventListener('input', event => { scene.name = event.target.value.slice(0, 60) || '未命名场景'; saveScene(); });
   $('#export-scene').addEventListener('click', exportScene); $('#import-scene').addEventListener('click', () => $('#scene-file').click());
   $('#scene-file').addEventListener('change', event => importScene(event.target.files[0]));
@@ -785,7 +781,7 @@ async function init() {
     onApply(id, crop) { scene.sources[id].crop = crop; scene.selected = id; updateInspector(); changed(); toast(`直播间 ${id} 裁剪已应用到实时画布`); }
   });
   watchView = new WatchView($('#watch-player'), { read: () => ({ scene, sources }), getState: watchState,
-    getAudio: () => new MediaStream(mixer.outputTracks().map(track => track.clone())), onSend: submitDanmaku, onStudio: () => switchView('studio') });
+    getAudio: () => new MediaStream(mixer.outputTracks().map(track => track.clone())), onSend: submitDanmaku });
   buildAudioTracks(); bindTransform(); bindEvents(); syncScene(); updateAudioState(); restoring = false; compositor.start();
   meterTimer = setInterval(() => {
     if (activeView !== 'studio') return;
