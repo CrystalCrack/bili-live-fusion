@@ -26,6 +26,11 @@ const compositor = new Compositor($('#composite'), () => scene, () => sources);
 let filter = new DanmakuFilter();
 let cropEditor, watchView;
 let activeView = 'studio', studioScroll = 0;
+let embeddedPageActive = false, pagePreviousMute = false;
+function syncPageAudio() {
+  mixer.setMonitorSuppressed(activeView === 'watch' || Boolean(outputServer?.watching) || embeddedPageActive);
+  if (watchView) watchView.video.muted = embeddedPageActive || pagePreviousMute;
+}
 const connectionEvents = [];
 let audioStarting = false;
 let observedAudioContext = null;
@@ -589,7 +594,7 @@ function switchView(view) {
   $('#studio-view').hidden = view !== 'studio'; $('#watch-view').hidden = view !== 'watch';
   for (const key of ['studio', 'watch']) { const button = $('#' + key + '-tab'); button.classList.toggle('active', key === view); button.setAttribute('aria-pressed', String(key === view)); }
   compositor.previewEnabled = view === 'studio';
-  mixer.setMonitorSuppressed(view === 'watch' || Boolean(outputServer?.watching));
+  mixer.setMonitorSuppressed(view === 'watch' || Boolean(outputServer?.watching) || embeddedPageActive);
   if (view === 'watch') { activateAudio(); watchView.enter(); window.scrollTo(0, 0); }
   else { if (document.fullscreenElement === $('#watch-player')) document.exitFullscreen().catch(() => {}); window.scrollTo(0, studioScroll); $('#studio-tab').focus({ preventScroll: true }); }
 }
@@ -601,7 +606,7 @@ async function openOutput(view = 'output') {
     if (!outputServer) outputServer = new OutputServer(view => compositor.createStream(mixer.outputTracks(), { danmaku: view !== 'watch' }), message => toast(message, 'error'), {
       getState: watchState, onSend: submitDanmaku,
       onFocus: () => { if (extension) chrome.tabs.getCurrent().then(tab => { if (tab) return chrome.tabs.update(tab.id, { active: true }).then(() => chrome.windows.update(tab.windowId, { focused: true })); }).catch(() => {}); else window.focus(); },
-      onWatching: watching => mixer.setMonitorSuppressed(activeView === 'watch' || watching)
+      onWatching: watching => mixer.setMonitorSuppressed(activeView === 'watch' || watching || embeddedPageActive)
     });
     outputServer.open(view); await mixer.init(); mixer.update(scene);
   } catch (error) { toast(error.message, 'error'); }
@@ -756,6 +761,18 @@ function bindEvents() {
   });
   $$('dialog').forEach(dialog => dialog.addEventListener('click', event => { if (event.target === dialog) { const rect = dialog.getBoundingClientRect(); if (event.clientX < rect.left || event.clientX > rect.right || event.clientY < rect.top || event.clientY > rect.bottom) dialog.close(); } }));
   window.addEventListener('focus', () => refreshRooms({ quiet: true }));
+  if (extension) {
+    const applyPageState = active => {
+      if (active === embeddedPageActive) return;
+      if (active && watchView) pagePreviousMute = watchView.video.muted;
+      embeddedPageActive = active; syncPageAudio();
+    };
+    let pageStateChanged = false;
+    chrome.storage.onChanged.addListener((changes, area) => {
+      if (area === 'session' && changes['fusion-embedded-tabs']) { pageStateChanged = true; applyPageState(Boolean(changes['fusion-embedded-tabs'].newValue?.length)); }
+    });
+    chrome.storage.session.get('fusion-embedded-tabs').then(stored => { if (!pageStateChanged) applyPageState(Boolean(stored['fusion-embedded-tabs']?.length)); }).catch(() => {});
+  }
   if (extension) chrome.runtime.onMessage.addListener(message => {
     if (message?.type !== 'SOURCE_EVENT') return;
     for (const id of CHANNELS) {

@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "bili直播融合姬",
-  "version": "0.3.5",
+  "version": "0.3.6",
   "description": "三路 + 一路 = 二路。将两个 Bilibili 直播间的画面、声音和弹幕实时融合，自由布局、选择画质、混音对轴，边看边互动。",
   "minimum_chrome_version": "116",
   "permissions": [
@@ -34,13 +34,30 @@
   },
   "content_scripts": [
     {
+      "matches": ["https://live.bilibili.com/*"],
+      "js": ["native-player.js"],
+      "world": "MAIN",
+      "run_at": "document_start"
+    },
+    {
       "matches": [
         "https://live.bilibili.com/*"
       ],
       "js": [
-        "content.js"
+        "content.js",
+        "page-embed.js"
       ],
       "run_at": "document_idle"
+    }
+  ],
+  "web_accessible_resources": [
+    {
+      "resources": [
+        "embed.html"
+      ],
+      "matches": [
+        "https://live.bilibili.com/*"
+      ]
     }
   ],
   "content_security_policy": {

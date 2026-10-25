@@ -1,6 +1,7 @@
 import { openStudio } from './lib/launch.js';
 import { BilibiliApi } from './lib/bilibili-api.js';
 import { ensureLiveNetwork } from './lib/live-network.js';
+import { validEmbedGrant } from './lib/embed-model.js';
 
 const studioUrl = chrome.runtime.getURL('studio.html');
 const api = new BilibiliApi({ cookie: async name => (await chrome.cookies.get({ url: 'https://www.bilibili.com/', name }))?.value || null });
@@ -9,6 +10,17 @@ const networkReady = ensureLiveNetwork();
 // Keep startup errors available for the first request without an unhandled
 // rejection when the worker starts before a studio is open.
 networkReady.catch(() => {});
+let embeddedTabsUpdate = Promise.resolve();
+function updateEmbeddedTab(tabId, active) {
+  embeddedTabsUpdate = embeddedTabsUpdate.catch(() => {}).then(async () => {
+    if (active) await roomTab(tabId);
+    const key = 'fusion-embedded-tabs', stored = await chrome.storage.session.get(key);
+    const previous = stored[key] || [], ids = new Set(previous);
+    if (active) ids.add(tabId); else ids.delete(tabId);
+    if (ids.size !== previous.length || previous.some(id => !ids.has(id))) await chrome.storage.session.set({ [key]: [...ids] });
+  });
+  return embeddedTabsUpdate;
+}
 
 chrome.action.onClicked.addListener(() => {
   openStudio().catch(error => console.error('打开工作台失败', error));
@@ -28,6 +40,20 @@ async function roomTab(tabId) {
 }
 
 chrome.runtime.onMessage.addListener((message, sender, respond) => {
+  if (message?.type === 'EMBED_LIFECYCLE' && sender.id === chrome.runtime.id && Number.isInteger(sender.tab?.id) && sender.frameId === 0) {
+    updateEmbeddedTab(sender.tab.id, message.active === true).catch(() => {});
+    return;
+  }
+  if (message?.type === 'EMBED_AUTHORIZE') {
+    (async () => {
+      const token = message.token, key = 'fusion-embed-' + token;
+      const grant = (await chrome.storage.session.get(key))[key];
+      if (!validEmbedGrant(grant, sender, token, chrome.runtime.id)) throw new Error('请在当前直播间通过插件小窗开启融合播放');
+      await roomTab(sender.tab.id); await chrome.storage.session.remove(key);
+      return { ok: true };
+    })().then(respond, error => respond({ ok: false, error: error.message }));
+    return true;
+  }
   if (message?.type === 'ROOM_EVENT') {
     if (sender.id !== chrome.runtime.id || !sender.tab?.id ||
         !/^https:\/\/live\.bilibili\.com\/\d+(?:[/?#]|$)/.test(sender.url || '')) return;
@@ -69,4 +95,11 @@ chrome.runtime.onMessage.addListener((message, sender, respond) => {
     }
   })().then(data => respond({ ok: true, data }), error => respond({ ok: false, error: error.message }));
   return true;
+});
+
+chrome.tabs.onRemoved.addListener(tabId => {
+  updateEmbeddedTab(tabId, false).catch(() => {});
+});
+chrome.tabs.onUpdated.addListener((tabId, change) => {
+  if (change.status === 'loading') updateEmbeddedTab(tabId, false).catch(() => {});
 });

@@ -16,6 +16,9 @@ for (const file of files.filter(file => file.endsWith('.js'))) {
 }
 const manifest = JSON.parse(fs.readFileSync(path.join(extension, 'manifest.json'), 'utf8'));
 if (manifest.manifest_version !== 3) errors.push('Manifest must use version 3');
+for (const rule of manifest.web_accessible_resources || []) for (const resource of rule.resources) {
+  if (!resource.includes('*') && !fs.existsSync(path.join(extension, resource))) errors.push('Missing web-accessible resource: ' + resource);
+}
 for (const file of [manifest.background.service_worker, manifest.action.default_popup, manifest.options_ui.page, ...Object.values(manifest.icons), ...manifest.content_scripts.flatMap(script => script.js)]) if (!fs.existsSync(path.join(extension, file))) errors.push(`Missing manifest asset: ${file}`);
 for (const file of files.filter(file => file.endsWith('.html'))) {
   const html = fs.readFileSync(file, 'utf8');

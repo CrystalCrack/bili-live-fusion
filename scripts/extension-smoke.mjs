@@ -26,10 +26,17 @@ try {
   assert.deepEqual(manifest.options_ui, { page: 'studio.html', open_in_tab: true });
   const studioOpened = context.waitForEvent('page', page => page.url() === studioUrl);
   await worker.evaluate(() => chrome.action.openPopup());
+  await worker.evaluate(async () => {
+    const [popup] = await chrome.runtime.getContexts({ contextTypes: ['POPUP'] });
+    if (!popup) throw new Error('Launcher popup did not open');
+  });
+  const popup = context.pages().find(page => page.url().endsWith('/launcher.html'));
+  assert.ok(popup, 'Toolbar opens the launcher');
+  await popup.locator('#open-studio').click();
   const studio = await studioOpened; studio.on('pageerror', error => errors.push(error.message));
   await studio.locator('#room-A').waitFor();
   await studio.waitForFunction(async () => (await chrome.runtime.getContexts({ contextTypes: ['POPUP'] })).length === 0);
-  console.log('PASS toolbar popup opens the studio through the browser action entry point');
+  console.log('PASS toolbar popup offers an explicit open-studio action');
   const studioId = await studio.evaluate(async () => (await chrome.tabs.getCurrent()).id);
   const otherTab = context.pages().find(page => page !== studio);
   await otherTab.bringToFront();
@@ -40,6 +47,9 @@ try {
     await chrome.windows.update(tab.windowId, { focused: true });
     await chrome.action.openPopup({ windowId: tab.windowId });
   }, studioId);
+  const repeatedPopup = context.pages().find(page => page.url().endsWith('/launcher.html'));
+  assert.ok(repeatedPopup, 'Repeated toolbar activation opens the launcher');
+  await repeatedPopup.locator('#open-studio').click();
   await studio.waitForFunction(async id => (await chrome.tabs.get(id)).active, studioId);
   assert.equal(await worker.evaluate(async () => (await chrome.tabs.query({ url: chrome.runtime.getURL('studio.html') })).length), 1);
   console.log('PASS repeated toolbar activation focuses the same studio tab');

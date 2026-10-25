@@ -11,3 +11,17 @@ a:hover { background: #0c6a52; border-color: #0c6a52; }
 a:focus-visible { outline: 2px solid #147d62; outline-offset: 4px; }
 .hint { font-size: 10px; text-align: center; color: #91a899; margin: 16px 0 0; }
 .error { color: #b65060; }
+body { width: 360px; padding: 23px; } h1 { font-size: 18px; }
+.saved-scene { margin: 22px 0 16px; border: 1px solid #dfeae3; background: #fff; border-radius: 12px; padding: 13px 15px; }
+.eyebrow { display: block; font-size: 10px; color: #90a499; margin-bottom: 6px; }
+.saved-scene strong { display: block; font-size: 13px; overflow-wrap: anywhere; }
+.saved-scene p { margin: 5px 0 0; font-size: 11px; overflow-wrap: anywhere; }
+button { font: inherit; cursor: pointer; width: 100%; border-radius: 11px; }
+#embed-live { display: flex; flex-direction: column; align-items: flex-start; gap: 5px; border: 1px solid #147d62; background: #147d62; color: white; padding: 14px 16px; }
+#embed-live span { font-size: 13px; font-weight: 600; } #embed-live small { font-size: 10px; opacity: .75; }
+#embed-live:hover { background: #0c6a52; } #embed-live:disabled { background: #e5eee8; border-color: #dce7df; color: #8da193; cursor: default; }
+#open-studio { margin-top: 10px; background: #fff; color: #46725a; border-color: #dbe7df; padding: 12px 16px; font-size: 12px; }
+#open-studio:hover { background: #eaf3ed; }
+#restore-player { margin-top: 12px; background: transparent; border: 0; color: #8d759f; padding: 5px; font-size: 11px; }
+#launch-status { margin: 15px 0 0; font-size: 11px; line-height: 1.7; } .hint { margin-top: 10px; font-size: 10px; }
+button:focus-visible { outline: 2px solid #147d62; outline-offset: 3px; } [hidden] { display: none !important; }
