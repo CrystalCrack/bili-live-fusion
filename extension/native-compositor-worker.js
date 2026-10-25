@@ -1,9 +1,15 @@
 import { drawGeometry, RESOLUTIONS } from './lib/model.js';
 
-let scene, canvas, context, painting = false, lastPaint = -Infinity, lastTimestamp = -Infinity;
+let scene, canvas, context, painting = false, lastPaint = -Infinity, lastTimestamp = -Infinity, timer = null;
 const frames = new Map();
+function schedule() {
+  if (timer !== null || painting || !context || !frames.size) return;
+  timer = setTimeout(() => { timer = null; paint(); }, Math.max(0, 1000 / scene.fps - (performance.now() - lastPaint)));
+}
 function paint() {
-  if (!context || painting || performance.now() - lastPaint < 1000 / scene.fps - 1) return;
+  if (!context || painting || !frames.size) return;
+  if (performance.now() - lastPaint < 1000 / scene.fps - 1) { schedule(); return; }
+  if (timer !== null) { clearTimeout(timer); timer = null; }
   painting = true; lastPaint = performance.now();
   let output;
   try {
@@ -34,5 +40,5 @@ self.onmessage = event => {
   } else if (message.type === 'source-frame' && ['A', 'B'].includes(message.id)) {
     frames.get(message.id)?.close(); frames.set(message.id, message.frame);
     self.postMessage({ type: 'consumed', id: message.id, generation: message.generation }); paint();
-  } else if (message.type === 'output-consumed') painting = false;
+  } else if (message.type === 'output-consumed') { painting = false; schedule(); }
 };

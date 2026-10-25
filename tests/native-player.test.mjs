@@ -6,11 +6,22 @@ import vm from 'node:vm';
 const source = fs.readFileSync(new URL('../extension/native-player.js', import.meta.url), 'utf8');
 function fixture() {
   const listeners = new Map(), messages = [], tracks = [];
-  let current, observer, peer;
-  class Media extends EventTarget {
-    constructor() { super(); this.object = null; this.position = 18; this.paused = false; this.volume = .7; this.muted = false; this.isConnected = true; this.loads = 0; this.clientWidth = 1280; this.clientHeight = 720; }
+  let current, observer, peer; const timers = new Map(); let timer = 0;
+  class Element extends EventTarget {
+    constructor() { super(); this.attributes = new Map(); }
+    getAttribute(name) { return this.attributes.get(String(name).toLowerCase()) ?? null; }
+    hasAttribute(name) { return this.attributes.has(String(name).toLowerCase()); }
+    setAttribute(name, value) { name = String(name).toLowerCase(); this.attributes.set(name, String(value)); if (name === 'src') { this.object = null; this.loads++; } }
+    removeAttribute(name) { name = String(name).toLowerCase(); this.attributes.delete(name); if (name === 'src') { this.object = null; this.loads++; } }
+    setAttributeNS(namespace, name, value) { this.setAttribute(name, value); }
+    removeAttributeNS(namespace, name) { this.removeAttribute(name); }
+  }
+  class Media extends Element {
+    constructor() { super(); this.object = null; this.position = 18; this.rate = 1; this.paused = false; this.volume = .7; this.muted = false; this.isConnected = true; this.loads = 0; this.clientWidth = 1280; this.clientHeight = 720; this.readyState = 4; this.videoWidth = 1920; this.videoHeight = 1080; this.attributes.set('src', 'blob:original'); }
     get srcObject() { return this.object; } set srcObject(value) { this.object = value; }
+    get src() { return this.getAttribute('src') || ''; } set src(value) { this.attributes.set('src', String(value)); this.object = null; this.loads++; }
     get currentTime() { return this.position; } set currentTime(value) { this.position = value; }
+    get playbackRate() { return this.rate; } set playbackRate(value) { this.rate = value; }
     load() { this.loads++; }
     async play() { this.paused = false; } pause() { this.paused = true; }
   }
@@ -26,15 +37,16 @@ function fixture() {
   const location = { origin: 'https://live.bilibili.com' };
   const window = { addEventListener(name, callback) { listeners.set(name, callback); } };
   const port = { postMessage(data, transfer) { assert.equal(transfer, undefined); messages.push(structuredClone(data)); }, start() {}, close() { this.closed = true; } };
-  const context = { window, location, HTMLMediaElement: Media, RTCPeerConnection: Peer,
+  const context = { window, location, HTMLMediaElement: Media, Element, RTCPeerConnection: Peer,
+    setInterval(callback) { timers.set(++timer, callback); return timer; }, clearInterval(id) { timers.delete(id); },
     MediaStream: class { constructor() { this.tracks = []; } addTrack(track) { this.tracks.push(track); } getTracks() { return this.tracks; } getVideoTracks() { return this.tracks.filter(track => track.kind === 'video'); } },
     MutationObserver: class { constructor(callback) { observer = callback; } observe() {} disconnect() { this.disconnected = true; } },
-    document: { querySelector() { return { querySelectorAll() { return [current]; } }; } }
+    document: { querySelector() { return { contains(video) { return video === current; }, querySelectorAll() { return [current]; } }; } }
   };
   vm.runInNewContext(source, context);
   const start = () => listeners.get('message')({ source: window, origin: location.origin, ports: [port], data: { type: 'BILI_FUSION_NATIVE_INIT', token: '12345678-1234-1234-1234-123456789abc' } });
   const receive = data => port.onmessage({ data });
-  return { Media, original, messages, tracks, port, start, receive, get peer() { return peer; },
+  return { Media, Element, original, messages, tracks, port, start, receive, timers, get peer() { return peer; },
     ready() { receive({ type: 'stream-ready' }); },
     track(kind, muted = false) { const track = new EventTarget(); Object.assign(track, { kind, muted, stop() { this.stopped = true; } }); tracks.push(track); peer.ontrack({ track }); return track; },
     replace(video) { current = video; observer(); }
@@ -66,13 +78,34 @@ test('native stream preserves playback controls and restores the original video 
   assert.equal(stream.getTracks().length, 2); assert.equal(video.volume, .7); assert.equal(video.muted, false);
   video.pause(); assert.equal(video.paused, true); await video.play(); assert.equal(video.paused, false);
   video.volume = .25; video.muted = true;
-  video.srcObject = null; video.load(); video.currentTime = 99;
+  video.srcObject = null; video.load(); video.currentTime = 99; video.playbackRate = 1.2;
   assert.equal(video.srcObject, stream); assert.equal(video.loads, 0); assert.equal(video.currentTime, 18);
   f.receive({ type: 'close' }); f.receive({ type: 'close' });
   assert.equal(video.srcObject, null); assert.equal(video.loads, 1); assert.equal(f.peer.closed, true);
+  assert.equal(video.playbackRate, 1.2); assert.equal(f.timers.size, 0);
   assert.equal(video.volume, .25); assert.equal(video.muted, true); assert.ok(f.tracks.every(track => track.stopped));
   video.currentTime = 22; assert.equal(video.currentTime, 22);
-  for (const name of ['srcObject', 'load', 'currentTime']) assert.equal(Object.hasOwn(video, name), false);
+  for (const name of ['srcObject', 'src', 'load', 'currentTime', 'playbackRate']) assert.equal(Object.hasOwn(video, name), false);
+});
+
+test('site source resets and cached prototype operations cannot restart the fused video', () => {
+  const f = fixture();
+  const src = Object.getOwnPropertyDescriptor(f.Media.prototype, 'src').set;
+  const object = Object.getOwnPropertyDescriptor(f.Media.prototype, 'srcObject').set;
+  const cachedSet = f.Element.prototype.setAttribute, cachedLoad = f.Media.prototype.load;
+  const untouched = new f.Media(); untouched.src = 'blob:other'; assert.equal(untouched.loads, 1);
+  f.start(); f.ready(); f.track('video'); const video = f.original, stream = video.srcObject;
+  video.src = 'blob:restart-1'; video.setAttribute('SRC', 'blob:restart-2'); video.removeAttribute('src');
+  video.setAttributeNS(null, 'src', 'blob:restart-3'); video.removeAttributeNS(null, 'src');
+  src.call(video, 'blob:restart-4'); cachedSet.call(video, 'src', 'blob:latest'); cachedLoad.call(video); object.call(video, null);
+  assert.equal(video.srcObject, stream); assert.equal(video.src, 'blob:original'); assert.equal(video.loads, 0);
+  [...f.timers.values()][0](); const health = f.messages.at(-1);
+  assert.equal(health.type, 'native-health'); assert.equal(health.data.sourceMatches, true);
+  assert.equal(health.data.blocked.src, 7); assert.equal(health.data.blocked.load, 1); assert.equal(health.data.blocked.srcObject, 1);
+  video.pause(); f.receive({ type: 'close' });
+  assert.equal(video.srcObject, null); assert.equal(video.src, 'blob:latest'); assert.equal(video.paused, true);
+  assert.equal(Object.hasOwn(video, 'src'), false);
+  video.src = 'blob:after'; assert.equal(video.src, 'blob:after');
 });
 
 test('native player replacement rebinds the same fusion stream and restores both elements', () => {

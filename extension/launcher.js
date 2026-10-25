@@ -19,6 +19,7 @@ async function initialize() {
   if (!Number.isInteger(tabId) || !isLiveRoomUrl(tab?.url)) { status('打开 B 站直播间后，可在这里应用融合画面'); return; }
   const state = await roomMessage('FUSION_EMBED_STATUS');
   $('#restore-player').hidden = !state?.active;
+  $('#copy-diagnostics').hidden = !state?.active;
   if (!config) { status('先打开工作台，配置并保存直播间'); return; }
   $('#embed-live').disabled = false; $('#restore-player').hidden = !state?.active;
   $('#embed-live span').textContent = state?.active ? '应用最新配置' : '在当前直播页播放';
@@ -41,5 +42,9 @@ $('#embed-live').addEventListener('click', async () => {
 });
 $('#restore-player').addEventListener('click', async () => {
   try { await roomMessage('FUSION_EMBED_RESTORE'); window.close(); } catch (error) { status(error.message, true); }
+});
+$('#copy-diagnostics').addEventListener('click', async () => {
+  try { const state = await roomMessage('FUSION_EMBED_STATUS'); await navigator.clipboard.writeText(JSON.stringify(state?.diagnostics || {}, null, 2)); status('播放信息已复制'); }
+  catch (error) { status(error.message || '复制失败，请重试', true); }
 });
 initialize().catch(error => status(error.message || '配置读取失败，请重新打开插件', true));

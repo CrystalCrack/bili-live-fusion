@@ -11,11 +11,12 @@ import { authorizeEmbed } from './lib/embed-startup.js';
 const token = location.hash.slice(1), label = document.querySelector('#state');
 const mixer = new AudioMixer(), session = new LiveSession();
 const sources = Object.fromEntries(CHANNELS.map(id => { const video = document.createElement('video'); video.playsInline = true; video.crossOrigin = 'anonymous'; video.muted = true; document.querySelector('#sources').append(video); return [id, { video }]; }));
-let scene, compositor, link, port, closed = false, failed = false, audioNeeded = true, attached = false, giveReady;
+let scene, compositor, link, port, closed = false, failed = false, audioNeeded = true, attached = false, giveReady, healthTimer;
 const receiverReady = new Promise(resolve => { giveReady = resolve; });
 function send(data) { if (!closed) port?.postMessage(data); }
 function status(text, error = false) { label.textContent = text; send({ type: 'state', text, error, audioNeeded }); }
 function stopMedia() {
+  clearInterval(healthTimer);
   link?.close(); compositor?.close();
   for (const source of Object.values(sources)) source.player?.stop();
   mixer.close().catch(() => {});
@@ -51,6 +52,10 @@ async function start() {
     await link.start(new MediaStream([compositor.track, ...mixer.outputTracks()]), scene.fps);
     if (closed || failed) return;
     activateAudio();
+    healthTimer = setInterval(() => {
+      if (closed || failed) return;
+      send({ type: 'producer-health', data: { compositor: compositor.snapshot(), connection: link.peer.connectionState, audio: mixer.context?.state, sources: Object.fromEntries(CHANNELS.map(id => { const video = sources[id].video; return [id, { time: video.currentTime, ready: video.readyState, paused: video.paused, width: video.videoWidth, height: video.videoHeight, error: video.error?.message || null }]; })) } });
+    }, 2000);
     for (const { id, room } of config.rooms) {
       if (closed || failed) break;
       const source = sources[id];

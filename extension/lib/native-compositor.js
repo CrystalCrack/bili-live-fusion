@@ -5,6 +5,7 @@ export class NativeCompositor {
     this.track.contentHint = 'detail'; this.writer = this.track.writable.getWriter();
     this.worker = new Worker(new URL('../native-compositor-worker.js', import.meta.url), { type: 'module' });
     this.inputs = new Map(); this.closed = false; this.generation = 0; this.ready = false;
+    this.frames = 0; this.lastFrame = null;
     this.worker.onerror = event => { if (!this.closed) onError(new Error(event.message || '融合画面处理已中断，请重新应用场景')); };
     this.onError = onError;
     this.worker.onmessage = async event => {
@@ -16,6 +17,7 @@ export class NativeCompositor {
         try {
           if (this.closed) return;
           await this.writer.write(frame);
+          this.frames++; this.lastFrame = Date.now();
           if (!this.closed && !this.ready) { this.ready = true; onReady(); }
         } catch (error) { if (!this.closed) onError(error); }
         finally { frame.close(); if (!this.closed) this.worker.postMessage({ type: 'output-consumed' }); }
@@ -24,20 +26,22 @@ export class NativeCompositor {
     this.worker.postMessage({ type: 'start', scene });
   }
   attach(id, video) {
+    if (this.closed) return;
     const old = this.inputs.get(id);
-    if (old?.track.readyState === 'live') return;
+    if (old?.track.readyState === 'live' && !old.track.muted && !old.done) return;
     const captured = video.captureStream(), track = captured.getVideoTracks()[0];
     captured.getAudioTracks().forEach(track => track.stop());
     if (!track) return;
     old?.track.stop(); old?.reader.cancel().catch(() => {});
     const processor = new MediaStreamTrackProcessor({ track, maxBufferSize: 1 });
-    const input = { track, reader: processor.readable.getReader(), generation: ++this.generation, pending: false };
+    const input = { track, reader: processor.readable.getReader(), generation: ++this.generation, pending: false, frames: 0, lastFrame: null, done: false };
     this.inputs.set(id, input); this.consume(id, input);
   }
   async consume(id, input) {
     try {
       while (!this.closed && this.inputs.get(id) === input) {
         const { value, done } = await input.reader.read(); if (done) break;
+        input.frames++; input.lastFrame = Date.now();
         if (this.closed || this.inputs.get(id) !== input || input.pending) { value.close(); continue; }
         try {
           input.pending = true;
@@ -45,8 +49,9 @@ export class NativeCompositor {
         } catch (error) { value.close(); throw error; }
       }
     } catch (error) { if (!this.closed && this.inputs.get(id) === input) this.onError(error); }
-    finally { input.reader.releaseLock(); }
+    finally { input.done = true; input.reader.releaseLock(); }
   }
+  snapshot() { return { frames: this.frames, lastFrame: this.lastFrame, sources: Object.fromEntries([...this.inputs].map(([id, input]) => [id, { frames: input.frames, lastFrame: input.lastFrame, state: input.track.readyState, muted: input.track.muted, done: input.done }])) }; }
   close() {
     if (this.closed) return; this.closed = true;
     this.worker.terminate(); this.track.stop(); this.writer.abort().catch(() => {});

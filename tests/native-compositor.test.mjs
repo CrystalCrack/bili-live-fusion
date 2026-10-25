@@ -6,15 +6,16 @@ import { defaultScene, drawGeometry, RESOLUTIONS } from '../extension/lib/model.
 
 const workerSource = fs.readFileSync(new URL('../extension/native-compositor-worker.js', import.meta.url), 'utf8').replace(/^import[^\n]+\n/, '');
 function fixture() {
-  const sent = [], drawn = []; let now = 0, throwDraw = false;
+  const sent = [], drawn = [], timers = new Map(); let now = 0, throwDraw = false, timer = 0;
   const self = { postMessage(message, transfer) { sent.push({ message, transfer }); } };
   const context = { self, performance: { now: () => now }, drawGeometry, RESOLUTIONS,
+    setTimeout(callback) { timers.set(++timer, callback); return timer; }, clearTimeout(id) { timers.delete(id); },
     OffscreenCanvas: class { constructor(width, height) { this.width = width; this.height = height; } getContext() { return { save() {}, restore() {}, beginPath() {}, rect() {}, clip() {}, fillRect() {}, drawImage(frame) { if (throwDraw) throw new Error('draw failed'); drawn.push(frame); } }; } },
     VideoFrame: class { constructor(canvas, options) { this.timestamp = options.timestamp; this.width = canvas.width; this.height = canvas.height; } close() { this.closed = true; } }
   };
   vm.runInNewContext(workerSource, context);
   const receive = data => self.onmessage({ data }); receive({ type: 'start', scene: defaultScene() });
-  return { sent, drawn, receive, set now(value) { now = value; }, set throwDraw(value) { throwDraw = value; },
+  return { sent, drawn, receive, timers, tick(value) { now = value; const tasks = [...timers.values()]; timers.clear(); for (const callback of tasks) callback(); }, set now(value) { now = value; }, set throwDraw(value) { throwDraw = value; },
     frame(id, timestamp = 0) { const frame = { timestamp, displayWidth: 1920, displayHeight: 1080, close() { this.closed = true; } }; receive({ type: 'source-frame', id, generation: 1, frame }); return frame; },
     outputs() { return sent.filter(entry => entry.message.type === 'frame'); }
   };
@@ -42,4 +43,14 @@ test('worker releases backpressure after a draw error', () => {
   const f = fixture(); f.throwDraw = true; f.frame('A');
   assert.equal(f.sent.at(-1).message.type, 'error');
   f.throwDraw = false; f.now = 40; f.frame('A'); assert.equal(f.outputs().length, 1);
+});
+
+test('worker keeps a stable real-time output when an input has a gap and applies backpressure', () => {
+  const f = fixture(); f.frame('A');
+  assert.equal(f.timers.size, 0);
+  f.receive({ type: 'output-consumed' }); assert.equal(f.timers.size, 1);
+  f.tick(34); assert.equal(f.outputs().length, 2); assert.equal(f.timers.size, 0);
+  f.tick(68); assert.equal(f.outputs().length, 2, 'No queue grows while the writer is still processing');
+  f.receive({ type: 'output-consumed' }); f.tick(68);
+  assert.deepEqual(f.outputs().map(entry => entry.message.frame.timestamp), [0, 34000, 68000]);
 });

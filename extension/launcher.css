@@ -23,5 +23,6 @@ button { font: inherit; cursor: pointer; width: 100%; border-radius: 11px; }
 #open-studio { margin-top: 10px; background: #fff; color: #46725a; border-color: #dbe7df; padding: 12px 16px; font-size: 12px; }
 #open-studio:hover { background: #eaf3ed; }
 #restore-player { margin-top: 12px; background: transparent; border: 0; color: #8d759f; padding: 5px; font-size: 11px; }
+#copy-diagnostics { margin-top: 6px; background: transparent; border: 0; color: #6f8e7c; padding: 5px; font-size: 11px; }
 #launch-status { margin: 15px 0 0; font-size: 11px; line-height: 1.7; } .hint { margin-top: 10px; font-size: 10px; }
 button:focus-visible { outline: 2px solid #147d62; outline-offset: 3px; } [hidden] { display: none !important; }

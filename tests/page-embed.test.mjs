@@ -18,7 +18,7 @@ function fixture() {
   class Channel { constructor() { this.port1 = new Port(); this.port2 = new Port(); channels.push(this); } }
   const context = { window, location: { pathname: '/6', origin: 'https://live.bilibili.com' }, MessageChannel: Channel,
     setTimeout(callback) { timers.set(++timer, callback); return timer; }, clearTimeout(id) { timers.delete(id); }, setInterval() { return 99; }, clearInterval() {},
-    chrome: { runtime: { id: 'fixture', getURL: path => 'chrome-extension://fixture/' + path,
+    chrome: { runtime: { id: 'fixture', getURL: path => 'chrome-extension://fixture/' + path, getManifest: () => ({ version: '0.3.9' }),
       sendMessage(data) { lifecycle.push(data.active); return Promise.resolve(); }, onMessage: { addListener(callback) { onMessage = callback; } } } },
     document: { querySelectorAll: () => [video], documentElement: { append() {} }, createElement() {
       frame = { isConnected: true, style: {}, setAttribute() {}, remove() { this.isConnected = false; }, contentWindow: { postMessage() {} } }; return frame;
@@ -45,6 +45,16 @@ test('page relay exchanges connection metadata and preserves native playback rep
   assert.deepEqual(f.native.sent.map(data => data.type), ['offer', 'candidate', 'stream-ready']);
   f.native.onmessage({ data: { type: 'attached' } });
   assert.equal(f.status().status, 'playing'); assert.equal(f.timers.size, 0); assert.deepEqual(f.lifecycle, [true]);
+});
+
+test('playback diagnostics expose source ownership and frame counters without connection tokens', () => {
+  const f = fixture(); f.apply();
+  const native = { sourceMatches: true, blocked: { src: 5 }, frames: 45 };
+  const producer = { compositor: { frames: 46, sources: { A: { frames: 44 } } } };
+  f.native.onmessage({ data: { type: 'native-health', data: native } });
+  f.producer.onmessage({ data: { type: 'producer-health', data: producer } });
+  assert.deepEqual(structuredClone(f.status().diagnostics), { version: '0.3.9', status: 'connecting', native, producer });
+  assert.equal(f.native.sent.length, 0); assert.equal(f.producer.sent.length, 0);
 });
 
 test('producer failure restores native live once and blocks late media status while keeping restore usable', () => {

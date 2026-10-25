@@ -47,6 +47,7 @@
     state.native = nativeChannel.port1; state.producer = producerChannel.port1;
     state.native.onmessage = event => {
       if (active !== state || state.failed) return; const data = event.data;
+      if (data?.type === 'native-health') { state.nativeHealth = data.data; return; }
       if (['ready', 'answer', 'candidate'].includes(data?.type)) state.producer.postMessage(data);
       else if (data?.type === 'attached') { state.attached = true; state.status = 'playing'; state.text = '已接入 B 站原生播放器'; clearTimeout(state.timeout); notifyStudio(true); state.producer.postMessage(data); showProcessor(state, state.audioNeeded); }
       else if (data?.type === 'error') fail(state, data.text);
@@ -56,6 +57,7 @@
       if (active !== state) return; const data = event.data;
       if (data?.type === 'close') { restore(); return; }
       if (state.failed) return;
+      if (data?.type === 'producer-health') { state.producerHealth = data.data; return; }
       if (['offer', 'candidate', 'stream-ready'].includes(data?.type)) state.native.postMessage(data);
       else if (data?.type === 'state') {
         if (data.error) { fail(state, data.text, false); return; }
@@ -69,7 +71,7 @@
   chrome.runtime.onMessage.addListener((message, sender, respond) => {
     if (sender.id !== chrome.runtime.id || sender.url !== chrome.runtime.getURL('launcher.html')) return;
     try {
-      if (message?.type === 'FUSION_EMBED_STATUS') respond({ active: Boolean(active), status: active?.status, text: active?.text });
+      if (message?.type === 'FUSION_EMBED_STATUS') respond({ active: Boolean(active), status: active?.status, text: active?.text, diagnostics: active ? { version: chrome.runtime.getManifest().version, status: active.status, native: active.nativeHealth || null, producer: active.producerHealth || null } : null });
       else if (message?.type === 'FUSION_EMBED_APPLY') respond(apply(message.token));
       else if (message?.type === 'FUSION_EMBED_RESTORE') { restore(); respond({ ok: true }); }
     } catch (error) { respond({ ok: false, error: error.message }); }
