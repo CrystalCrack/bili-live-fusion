@@ -5,6 +5,7 @@
   "type": "module",
   "description": "bili直播融合姬 · 三路 + 一路 = 二路 · 双 Bilibili 直播实时融合",
   "scripts": {
+    "site:privacy": "node scripts/build-privacy.mjs",
     "test": "node --test tests/*.test.mjs",
     "check": "node scripts/check.mjs",
     "preview": "node scripts/preview.mjs",

@@ -6,7 +6,8 @@
 
 - listing.zh-CN.md：名称、简短说明、完整介绍、7 项搜索词与更新说明。
 - review-notes.zh-CN.md：单一用途、权限与站点访问用途、远程代码说明、数据使用依据、审核操作说明。
-- privacy-policy.zh-CN.md：按当前代码整理的隐私政策模板；填写发布者与邮箱后发布到公开网页。
+- privacy-policy.zh-CN.md：隐私政策正文，已填写发布者 PeanutJelly 和支持邮箱 CrystalCracks@outlook.com。
+- ../index.html：由隐私政策正文生成的公开网页；修改正文后运行 npm run site:privacy 并提交、推送。
 - logo-300.png：沿用产品现有自有图标的 300 × 300 PNG，单独上传至商店。
 - 工作区根目录 bili-live-fusion-edge-0.3.5.zip：扩展提交包，manifest.json 位于 ZIP 根目录；不包含源码仓库、测试与本文件夹。
 
@@ -15,7 +16,7 @@
 1. 在 Partner Center 的 Edge 扩展开发者后台创建扩展，上传上述 ZIP。
 2. 设置公开范围、市场和最接近娱乐或视频观看的现有分类。
 3. 用 review-notes.zh-CN.md 填写用途、权限、远程代码与数据使用说明；按当前后台实际问题逐项核对。
-4. 将隐私政策中的两项发布者信息补齐，发布到自己可维护且无需登录的公开网页，填入真实 URL。
+4. Privacy Policy URL 填写 https://crystalcrack.github.io/bili-live-fusion/ 。
 5. 简体中文列表中填写 listing.zh-CN.md 对应文案，上传 logo-300.png 和真实运行截图。
 6. 填入审核操作说明，检查预览后由发布者提交。
 
@@ -38,13 +39,18 @@
 
 若使用演示画面作为素材，配文写明“演示场景”。公开素材使用有权展示的直播内容，隐藏私人账号及无关信息。
 
+## GitHub 与隐私政策网页
+
+- 项目仓库：https://github.com/CrystalCrack/bili-live-fusion
+- 隐私政策：https://crystalcrack.github.io/bili-live-fusion/
+- 发布方式：GitHub Pages，main 分支的 /docs 目录。
+- 隐私政策正文是 store/privacy-policy.zh-CN.md，网页是生成文件；更新时先修改正文，再运行 npm run site:privacy。
+
 ## 尚需发布者提供
 
-- 实际发布者名称、支持邮箱。
-- 填写完整并已上线的隐私政策网址。
 - 当前版本的运行截图，以及最终市场、分类等账户字段。
 
-这些材料只保存在本机，尚未向 Partner Center 上传或提交。
+尚未向 Partner Center 上传或提交。
 
 ## 官方依据
 

@@ -4,6 +4,8 @@
 
 Edge 商店名称、介绍、权限审核说明、隐私政策模板及提交清单见 [上架材料](docs/store/README.md)。
 
+[GitHub 项目](https://github.com/CrystalCrack/bili-live-fusion) · [隐私政策](https://crystalcrack.github.io/bili-live-fusion/)
+
 Microsoft Edge Manifest V3 扩展，把两个 Bilibili 直播间的直播画面、声音、弹幕实时融合进同一块画布。当前版本 **0.3.5**。
 
 工作台直接请求 Bilibili 播放接口和弹幕接口，在扩展内解码 HLS / HTTP-FLV，声音来自同一播放器。**无需打开直播间页面或分享屏幕。** 工作台预览和观看播放器位于同一页面，切换时沿用两路直播解码器与混合音轨；独立直播输出窗口通过本机 WebRTC 传递。两者都持续处理直播，没有先录制再处理的步骤。
