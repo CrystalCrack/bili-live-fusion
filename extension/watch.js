@@ -1,5 +1,6 @@
 import { WatchDanmaku } from './lib/watch-danmaku.js';
 import { LiveSurface } from './lib/live-surface.js';
+import { WatchChat } from './lib/watch-chat.js';
 
 export class WatchView {
   constructor(player, { read, getState, getAudio, onSend }) {
@@ -7,20 +8,28 @@ export class WatchView {
     this.$ = selector => player.querySelector(selector);
     const $ = this.$; this.video = $('#watch-video'); this.video.volume = .8; this.video.muted = false;
     this.state = { sources: [], danmaku: {} }; this.active = false; this.sending = false; this.danmakuEnabled = true; this.homes = [];
+    this.sidebarOpen = true;
+    this.chat = new WatchChat($('#watch-chat'), { onCopy: text => this.copyText(text), onRepeat: (text, target) => this.sendDanmaku(text, target) });
     this.comments = new WatchDanmaku($('#watch-danmaku'), { onCopy: text => this.copyText(text), onRepeat: (text, target) => this.sendDanmaku(text, target) });
     this.surface = new LiveSurface($('#watch-canvas'), read, (w, h) => { const picture = $('#watch-picture'); this.comments.resize((picture.clientWidth - w) / 2, (picture.clientHeight - h) / 2, w, h); }, $('#watch-decoders'));
     this.observer = new ResizeObserver(() => this.fit()); this.observer.observe($('#watch-picture'));
-    player.addEventListener('pointermove', () => this.showControls()); player.addEventListener('focusin', () => this.showControls());
+    $('#watch-picture').addEventListener('pointermove', () => this.showControls());
+    $('#watch-picture').addEventListener('pointerleave', () => this.showControls());
+    player.addEventListener('focusin', () => this.showControls());
+    player.addEventListener('focusout', () => this.showControls());
+    $('.watch-footer').addEventListener('pointermove', () => this.showControls());
+    $('.watch-footer').addEventListener('pointerleave', () => this.showControls());
     $('#watch-picture').addEventListener('dblclick', event => { if (!event.target.closest('button, input, select, .watch-comment')) this.fullscreen(); });
     $('#watch-play').addEventListener('click', () => this.togglePlay());
     $('#watch-audio').addEventListener('click', () => { this.video.muted = !this.video.muted; if (!this.video.muted && !this.video.volume) { this.video.volume = .8; $('#watch-volume').value = '80'; } this.updateAudio(); });
     $('#watch-volume').addEventListener('input', event => { this.video.volume = Number(event.target.value) / 100; this.video.muted = this.video.volume === 0; });
     this.video.addEventListener('volumechange', () => this.updateAudio());
-    $('#watch-toggle-danmaku').addEventListener('click', () => { this.danmakuEnabled = !this.danmakuEnabled; this.comments.setEnabled(this.danmakuEnabled); $('#watch-toggle-danmaku').textContent = '弹幕 ' + (this.danmakuEnabled ? '开' : '关'); $('#watch-toggle-danmaku').setAttribute('aria-pressed', String(this.danmakuEnabled)); });
+    $('#watch-toggle-danmaku').addEventListener('click', () => { this.danmakuEnabled = !this.danmakuEnabled; this.comments.setEnabled(this.danmakuEnabled); $('#watch-toggle-danmaku').setAttribute('aria-label', this.danmakuEnabled ? '关闭画面弹幕' : '开启画面弹幕'); $('#watch-toggle-danmaku').setAttribute('aria-pressed', String(this.danmakuEnabled)); });
+    $('#watch-sidebar-toggle').addEventListener('click', () => this.setSidebar(!this.sidebarOpen));
     $('#watch-fullscreen').addEventListener('click', () => this.fullscreen());
     $('#watch-send-text').addEventListener('input', () => this.updateSend()); $('#watch-send-target').addEventListener('change', () => this.updateSend());
     $('#watch-send-form').addEventListener('submit', async event => { event.preventDefault(); const input = $('#watch-send-text'), text = input.value; if (await this.sendDanmaku(text, $('#watch-send-target').value)) { if (input.value === text) input.value = ''; this.updateSend(); } });
-    document.addEventListener('fullscreenchange', () => { if (!this.active) return; const active = document.fullscreenElement === player; $('#watch-fullscreen').textContent = active ? '退出全屏' : '全屏'; $('#watch-fullscreen').setAttribute('aria-pressed', String(active)); this.fit(); this.showControls(); });
+    document.addEventListener('fullscreenchange', () => { if (!this.active) return; const active = document.fullscreenElement === player; this.controlIcon('#watch-fullscreen', active ? 'i-exit-full' : 'i-full', active ? '退出全屏' : '全屏'); $('#watch-fullscreen').setAttribute('aria-pressed', String(active)); this.updateChatVisibility(); this.fit(); this.showControls(); });
     document.addEventListener('keydown', event => {
       if (!this.active || event.isComposing || event.target.closest('input, select, textarea, button, [contenteditable]') || event.altKey || event.ctrlKey || event.metaKey) return;
       if (event.code === 'Space') { event.preventDefault(); this.togglePlay(); }
@@ -37,18 +46,20 @@ export class WatchView {
     }
     this.audio = this.getAudio(); this.video.srcObject = this.audio; this.surface.setPaused(false); this.surface.start();
     this.setState(this.getState()); this.fit(); this.comments.setPaused(false); this.updatePlay(); this.updateAudio(); this.showControls();
+    this.updateChatVisibility();
     this.video.play().catch(() => { if (this.active) this.notice('点击播放，开启直播声音'); });
     this.player.focus({ preventScroll: true });
   }
   leave() {
-    if (!this.active) return; this.active = false; clearTimeout(this.hideTimer); this.comments.clear(); this.comments.setPaused(true);
+    if (!this.active) return; this.active = false; clearTimeout(this.hideTimer); clearTimeout(this.noticeTimer); this.comments.clear(); this.comments.setPaused(true); this.chat.setActive(false);
+    this.player.classList.remove('has-notice');
     this.video.pause(); this.video.srcObject = null; this.audio?.getTracks().forEach(track => track.stop()); this.audio = null;
     for (const { video, home } of this.homes) { home.before(video); home.remove(); } this.homes = [];
     this.surface.stop();
   }
-  close() { this.leave(); this.observer.disconnect(); }
+  close() { this.leave(); this.chat.close(); clearTimeout(this.noticeTimer); this.observer.disconnect(); }
   setState(next) {
-    if (this.state.sources.length && next.sources?.some(source => this.state.sources.find(previous => previous.id === source.id)?.room !== source.room)) this.comments.clear();
+    if (this.state.sources.length && next.sources?.some(source => this.state.sources.find(previous => previous.id === source.id)?.room !== source.room)) this.clear();
     this.state = next; this.comments.configure(next.danmaku || {}); const select = this.$('#watch-send-target');
     for (const option of select.options) {
       const ids = option.value === 'both' ? ['A', 'B'] : [option.value]; option.disabled = !ids.every(id => next.sources?.some(source => source.id === id && source.available));
@@ -57,16 +68,41 @@ export class WatchView {
     if (select.selectedOptions[0]?.disabled) select.value = [...select.options].find(option => !option.disabled)?.value || 'A';
     const ready = Object.values(this.read().sources).some(source => source.video.readyState >= 2 && (source.player?.connected || source.stream?.getVideoTracks().some(track => track.readyState === 'live')));
     this.$('#watch-state').hidden = ready; if (this.active) this.surface.layout(); this.updateSend();
+    this.chat.setSources(next.sources || []); this.updateRoomBar(next.sources || []);
   }
-  add(item) { if (this.active) this.comments.add(item); }
-  clear() { this.comments.clear(); }
+  add(item) { this.chat.add(item); if (this.active) this.comments.add(item); }
+  clear() { this.comments.clear(); this.chat.clear(); }
+  setSidebar(open) {
+    this.sidebarOpen = open; this.player.classList.toggle('chat-collapsed', !open);
+    this.$('#watch-sidebar-toggle').setAttribute('aria-pressed', String(open));
+    this.$('#watch-sidebar-toggle').setAttribute('aria-label', open ? '收起弹幕列表' : '展开弹幕列表');
+    this.updateChatVisibility(); this.fit(); this.showControls();
+  }
+  updateChatVisibility() { this.chat.setActive(this.active && this.sidebarOpen && document.fullscreenElement !== this.player); }
+  updateRoomBar(sources) {
+    const signature = JSON.stringify(sources.map(({ id, room, connected, quality, demo }) => ({ id, room, connected, quality, demo })));
+    if (signature === this.roomSignature) return; this.roomSignature = signature;
+    const connected = sources.filter(source => source.connected).length;
+    this.$('#watch-room-summary').textContent = connected ? connected + ' 路现场 · 画面 / 声音 / 弹幕' : '等待直播源接入';
+    const fragment = document.createDocumentFragment();
+    for (const source of sources) {
+      const chip = document.createElement('div'); chip.className = 'watch-room-chip source-' + source.id.toLowerCase();
+      const badge = document.createElement('span'); badge.className = 'source-badge ' + source.id.toLowerCase(); badge.textContent = source.id;
+      const room = document.createElement('span'); room.className = 'watch-chip-room'; room.textContent = source.demo ? '演示现场' : source.room || '等待连接';
+      chip.title = '直播间 ' + source.id + ' · ' + room.textContent + (source.quality ? ' · ' + source.quality : '');
+      chip.append(badge, room);
+      if (source.quality && source.connected) { const quality = document.createElement('span'); quality.className = 'watch-chip-quality'; quality.textContent = source.quality; chip.append(quality); }
+      fragment.append(chip);
+    }
+    this.$('#watch-room-sources').replaceChildren(fragment);
+  }
   fit() {
     if (!this.active) return; const picture = this.$('#watch-picture'), width = picture.clientWidth, height = picture.clientHeight;
     this.surface.resize(width, height);
   }
   showControls() {
     if (!this.active) return; this.player.classList.remove('quiet'); clearTimeout(this.hideTimer);
-    this.hideTimer = setTimeout(() => { if (this.$('#watch-state').hidden && !this.player.querySelector('.watch-chrome:focus-within, .watch-comment:hover, .watch-comment:focus-within, .watch-controls:hover, .watch-heading:hover')) this.player.classList.add('quiet'); }, 2500);
+    this.hideTimer = setTimeout(() => { if (this.$('#watch-state').hidden && !this.player.querySelector('.watch-chrome :focus-visible, .watch-comment:hover, .watch-comment:focus-within, .watch-controls:hover, .watch-footer:hover, .watch-footer:focus-within') && !this.sending) this.player.classList.add('quiet'); }, 2500);
   }
   async fullscreen() { try { if (document.fullscreenElement) await document.exitFullscreen(); else await this.player.requestFullscreen(); } catch { this.notice('请在浏览器菜单中开启全屏', true); } this.showControls(); }
   async togglePlay() {
@@ -74,9 +110,14 @@ export class WatchView {
     if (this.surface.paused) this.video.pause(); else { try { await this.video.play(); } catch { this.notice('点击开启声音，继续直播'); } }
     this.updatePlay(); this.showControls();
   }
-  updatePlay() { const text = this.surface.paused ? '播放' : '暂停'; this.$('#watch-play').textContent = text; this.$('#watch-play').setAttribute('aria-label', text); }
-  updateAudio() { const audible = !this.video.muted && this.video.volume > 0; this.$('#watch-audio').textContent = audible ? '静音' : '开启声音'; this.$('#watch-audio').setAttribute('aria-pressed', String(audible)); }
-  notice(text, error = false) { this.$('#watch-notice').textContent = text; this.$('#watch-notice').classList.toggle('error', error); }
+  controlIcon(selector, icon, label) { const button = this.$(selector); button.querySelector('use').setAttribute('href', '#' + icon); button.setAttribute('aria-label', label); }
+  updatePlay() { this.controlIcon('#watch-play', this.surface.paused ? 'i-play' : 'i-pause', this.surface.paused ? '播放' : '暂停'); }
+  updateAudio() { const audible = !this.video.muted && this.video.volume > 0; this.controlIcon('#watch-audio', audible ? 'i-volume' : 'i-muted', audible ? '静音' : '开启声音'); this.$('#watch-audio').setAttribute('aria-pressed', String(audible)); }
+  notice(text, error = false) {
+    clearTimeout(this.noticeTimer); this.$('#watch-notice').textContent = text; this.$('#watch-notice').classList.toggle('error', error);
+    this.player.classList.add('has-notice'); this.showControls();
+    this.noticeTimer = setTimeout(() => { this.player.classList.remove('has-notice'); this.$('#watch-notice').textContent = '悬停弹幕，复制或 +1 加入话题'; this.$('#watch-notice').classList.remove('error'); }, 5000);
+  }
   updateSend() {
     const text = this.$('#watch-send-text').value.trim(), count = [...text].length; this.$('#watch-text-count').textContent = count + '/30'; this.$('#watch-text-count').classList.toggle('over-limit', count > 30);
     this.$('#watch-send-text').setAttribute('aria-invalid', String(count > 30));

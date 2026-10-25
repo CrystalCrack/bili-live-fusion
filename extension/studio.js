@@ -573,7 +573,12 @@ function stamp() { const d = new Date(); return `${d.getFullYear()}${String(d.ge
 function hasSource() { return CHANNELS.some(id => sourceActive(sources[id])); }
 async function outputStream() { await mixer.init(); mixer.update(scene); return compositor.createStream(mixer.outputTracks()); }
 function watchState() {
-  return { danmaku: { ...scene.danmaku }, sources: CHANNELS.map(id => ({ id, room: sources[id].roomId || parseRoomId(scene.sources[id].room) || '', available: Boolean(sources[id].demo || sources[id].roomId || sources[id].tabId) })) };
+  return { danmaku: { ...scene.danmaku }, sources: CHANNELS.map(id => ({ id,
+    room: sources[id].roomId || parseRoomId(scene.sources[id].room) || '',
+    available: Boolean(sources[id].demo || sources[id].roomId || sources[id].tabId),
+    connected: sourceActive(sources[id]), demo: Boolean(sources[id].demo),
+    quality: sources[id].player ? document.querySelector('#quality-' + id).selectedOptions[0]?.textContent || '' : ''
+  })) };
 }
 function switchView(view) {
   if (activeView === view) return;
