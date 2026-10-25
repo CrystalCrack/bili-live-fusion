@@ -53,9 +53,10 @@ async function start() {
     await link.start(new MediaStream([compositor.track, ...mixer.outputTracks()]), scene.fps);
     if (closed || failed) return;
     activateAudio();
-    healthTimer = setInterval(() => {
+    healthTimer = setInterval(async () => {
       if (closed || failed) return;
-      send({ type: 'producer-health', data: { compositor: compositor.snapshot(), connection: link.peer.connectionState, audio: mixer.context?.state, sources: Object.fromEntries(CHANNELS.map(id => { const video = sources[id].video; return [id, { time: video.currentTime, ready: video.readyState, paused: video.paused, width: video.videoWidth, height: video.videoHeight, error: video.error?.message || null }]; })) } });
+      const encoding = await link.collectStats(); if (closed || failed) return;
+      send({ type: 'producer-health', data: { compositor: compositor.snapshot(), encoding, connection: link.peer.connectionState, audio: mixer.context?.state, sources: Object.fromEntries(CHANNELS.map(id => { const video = sources[id].video; return [id, { time: video.currentTime, ready: video.readyState, paused: video.paused, width: video.videoWidth, height: video.videoHeight, error: video.error?.message || null }]; })) } });
     }, 2000);
     for (const { id, room } of config.rooms) {
       if (closed || failed) break;

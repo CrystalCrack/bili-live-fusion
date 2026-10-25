@@ -18,7 +18,7 @@ function fixture() {
   class Channel { constructor() { this.port1 = new Port(); this.port2 = new Port(); channels.push(this); } }
   const context = { window, location: { pathname: '/6', origin: 'https://live.bilibili.com' }, MessageChannel: Channel,
     setTimeout(callback) { timers.set(++timer, callback); return timer; }, clearTimeout(id) { timers.delete(id); }, setInterval() { return 99; }, clearInterval() {},
-    chrome: { runtime: { id: 'fixture', getURL: path => 'chrome-extension://fixture/' + path, getManifest: () => ({ version: '0.3.11' }),
+    chrome: { runtime: { id: 'fixture', getURL: path => 'chrome-extension://fixture/' + path, getManifest: () => ({ version: '0.3.12' }),
       sendMessage(data) { lifecycle.push(data.active); return Promise.resolve(); }, onMessage: { addListener(callback) { onMessage = callback; } } } },
     document: { querySelectorAll: () => [video], documentElement: { append() {} }, createElement() {
       frame = { isConnected: true, style: {}, setAttribute() {}, remove() { this.isConnected = false; }, contentWindow: { postMessage() {} } }; return frame;
@@ -75,7 +75,7 @@ test('playback diagnostics expose source ownership and frame counters without co
   const producer = { compositor: { frames: 46, sources: { A: { frames: 44 } } } };
   f.native.onmessage({ data: { type: 'native-health', data: native } });
   f.producer.onmessage({ data: { type: 'producer-health', data: producer } });
-  assert.deepEqual(structuredClone(f.status().diagnostics), { version: '0.3.11', status: 'connecting', native, producer });
+  assert.deepEqual(structuredClone(f.status().diagnostics), { version: '0.3.12', status: 'connecting', native, producer });
   assert.equal(f.native.sent.length, 0); assert.equal(f.producer.sent.length, 0);
 });
 

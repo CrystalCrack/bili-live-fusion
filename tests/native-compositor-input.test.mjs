@@ -20,6 +20,8 @@ test('source capture is reused while active and rebuilt after a muted or finishe
   globalThis.Worker = class { postMessage() {} terminate() { this.terminated = true; } };
   const video = { captureStream() { const track = { readyState: 'live', muted: false, stop() { this.readyState = 'ended'; } }; tracks.push(track); return { getVideoTracks: () => [track], getAudioTracks: () => [] }; } };
   const compositor = new NativeCompositor(defaultScene(), () => {}, error => errors.push(error));
+  compositor.worker.onmessage({ data: { type: 'renderer-info', info: { backend: 'webgl2', renderer: 'AMD Radeon' } } });
+  assert.equal(compositor.snapshot().renderer.renderer, 'AMD Radeon');
   compositor.attach('A', video); compositor.attach('A', video); assert.equal(tracks.length, 1);
   tracks[0].muted = true; compositor.attach('A', video);
   assert.equal(tracks.length, 2); assert.equal(tracks[0].readyState, 'ended'); assert.equal(readers[0].cancelled, true);

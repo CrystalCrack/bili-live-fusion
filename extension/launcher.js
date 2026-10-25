@@ -1,10 +1,17 @@
 import { openStudio } from './lib/launch.js';
 import { embeddedScene, isLiveRoomUrl } from './lib/embed-model.js';
 import { withTimeout } from './lib/async.js';
+import { accelerationStatus } from './lib/acceleration-status.js';
 
 const $ = selector => document.querySelector(selector);
-let tabId, applying = false;
+let tabId, applying = false, healthTimer;
 function status(text, error = false) { $('#launch-status').textContent = text; $('#launch-status').classList.toggle('error', error); }
+function updateAcceleration(state) {
+  const info = state?.active ? accelerationStatus(state.diagnostics) : null;
+  $('#acceleration').hidden = !info;
+  if (!info) return;
+  $('#acceleration-title').textContent = info.title; $('#acceleration-device').textContent = info.device; $('#acceleration-details').textContent = info.details;
+}
 async function roomMessage(type, data = {}) {
   try { return await withTimeout(chrome.tabs.sendMessage(tabId, { type, ...data }), 5000, '网页响应超时，请刷新直播间后重试'); }
   catch { throw new Error('请刷新当前直播间页面，再点击插件'); }
@@ -18,6 +25,8 @@ async function initialize() {
   $('#scene-rooms').textContent = config ? config.rooms.map(({ id, room }) => id + ' · ' + room).join('　/　') : '连接直播间并调整布局、画质和声音';
   if (!Number.isInteger(tabId) || !isLiveRoomUrl(tab?.url)) { status('打开 B 站直播间后，可在这里应用融合画面'); return; }
   const state = await roomMessage('FUSION_EMBED_STATUS');
+  updateAcceleration(state);
+  if (state?.active) healthTimer = setInterval(async () => { try { updateAcceleration(await roomMessage('FUSION_EMBED_STATUS')); } catch { clearInterval(healthTimer); } }, 2000);
   $('#restore-player').hidden = !state?.active;
   $('#copy-diagnostics').hidden = !state?.active;
   if (!config) { status('先打开工作台，配置并保存直播间'); return; }
@@ -48,3 +57,4 @@ $('#copy-diagnostics').addEventListener('click', async () => {
   catch (error) { status(error.message || '复制失败，请重试', true); }
 });
 initialize().catch(error => status(error.message || '配置读取失败，请重新打开插件', true));
+window.addEventListener('pagehide', () => clearInterval(healthTimer), { once: true });

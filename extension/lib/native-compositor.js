@@ -5,12 +5,14 @@ export class NativeCompositor {
     this.track.contentHint = 'detail'; this.writer = this.track.writable.getWriter();
     this.worker = new Worker(new URL('../native-compositor-worker.js', import.meta.url), { type: 'module' });
     this.inputs = new Map(); this.closed = false; this.generation = 0; this.ready = false;
-    this.frames = 0; this.lastFrame = null;
+    this.frames = 0; this.lastFrame = null; this.renderer = null;
     this.worker.onerror = event => { if (!this.closed) onError(new Error(event.message || '融合画面处理已中断，请重新应用场景')); };
     this.onError = onError;
     this.worker.onmessage = async event => {
       const data = event.data;
-      if (data?.type === 'consumed') {
+      if (data?.type === 'renderer-info') {
+        this.renderer = data.info;
+      } else if (data?.type === 'consumed') {
         const input = this.inputs.get(data.id); if (input?.generation === data.generation) input.pending = false;
       } else if (data?.type === 'frame') {
         const frame = data.frame;
@@ -51,7 +53,7 @@ export class NativeCompositor {
     } catch (error) { if (!this.closed && this.inputs.get(id) === input) this.onError(error); }
     finally { input.done = true; input.reader.releaseLock(); }
   }
-  snapshot() { return { frames: this.frames, lastFrame: this.lastFrame, sources: Object.fromEntries([...this.inputs].map(([id, input]) => [id, { frames: input.frames, lastFrame: input.lastFrame, state: input.track.readyState, muted: input.track.muted, done: input.done }])) }; }
+  snapshot() { return { frames: this.frames, lastFrame: this.lastFrame, renderer: this.renderer, sources: Object.fromEntries([...this.inputs].map(([id, input]) => [id, { frames: input.frames, lastFrame: input.lastFrame, state: input.track.readyState, muted: input.track.muted, done: input.done }])) }; }
   close() {
     if (this.closed) return; this.closed = true;
     this.worker.terminate(); this.track.stop(); this.writer.abort().catch(() => {});

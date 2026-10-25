@@ -26,3 +26,7 @@ button { font: inherit; cursor: pointer; width: 100%; border-radius: 11px; }
 #copy-diagnostics { margin-top: 6px; background: transparent; border: 0; color: #6f8e7c; padding: 5px; font-size: 11px; }
 #launch-status { margin: 15px 0 0; font-size: 11px; line-height: 1.7; } .hint { margin-top: 10px; font-size: 10px; }
 button:focus-visible { outline: 2px solid #147d62; outline-offset: 3px; } [hidden] { display: none !important; }
+.acceleration { margin-top: 14px; padding: 11px 13px; border: 1px solid #dfeae3; border-radius: 10px; background: #fff; }
+.acceleration strong { display: block; font-size: 11px; color: #32745a; }
+.acceleration span { display: block; margin-top: 5px; font-size: 10px; line-height: 1.6; color: #7c9386; overflow-wrap: anywhere; }
+.acceleration span:empty { display: none; }
