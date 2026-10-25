@@ -1,6 +1,6 @@
 # Edge 商店提交材料
 
-产品：bili直播融合姬 · 版本：0.3.10
+产品：bili直播融合姬 · 版本：0.3.11
 
 ## 已整理
 
@@ -9,7 +9,7 @@
 - privacy-policy.zh-CN.md：隐私政策正文，已填写发布者 PeanutJelly 和支持邮箱 CrystalCracks@outlook.com。
 - ../index.html：由隐私政策正文生成的公开网页；修改正文后运行 npm run site:privacy 并提交、推送。
 - logo-300.png：沿用产品现有自有图标的 300 × 300 PNG，单独上传至商店。
-- 工作区根目录 bili-live-fusion-edge-0.3.10.zip：扩展提交包，manifest.json 位于 ZIP 根目录；不包含源码仓库、测试与本文件夹。
+- 工作区根目录 bili-live-fusion-edge-0.3.11.zip：扩展提交包，manifest.json 位于 ZIP 根目录；不包含源码仓库、测试与本文件夹。
 
 ## 填写顺序
 
