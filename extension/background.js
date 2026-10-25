@@ -1,7 +1,6 @@
 import { openStudio } from './lib/launch.js';
 import { BilibiliApi } from './lib/bilibili-api.js';
 import { ensureLiveNetwork } from './lib/live-network.js';
-import { validEmbedGrant } from './lib/embed-model.js';
 
 const studioUrl = chrome.runtime.getURL('studio.html');
 const api = new BilibiliApi({ cookie: async name => (await chrome.cookies.get({ url: 'https://www.bilibili.com/', name }))?.value || null });
@@ -43,16 +42,6 @@ chrome.runtime.onMessage.addListener((message, sender, respond) => {
   if (message?.type === 'EMBED_LIFECYCLE' && sender.id === chrome.runtime.id && Number.isInteger(sender.tab?.id) && sender.frameId === 0) {
     updateEmbeddedTab(sender.tab.id, message.active === true).catch(() => {});
     return;
-  }
-  if (message?.type === 'EMBED_AUTHORIZE') {
-    (async () => {
-      const token = message.token, key = 'fusion-embed-' + token;
-      const grant = (await chrome.storage.session.get(key))[key];
-      if (!validEmbedGrant(grant, sender, token, chrome.runtime.id)) throw new Error('请在当前直播间通过插件小窗开启融合播放');
-      await roomTab(sender.tab.id); await chrome.storage.session.remove(key);
-      return { ok: true };
-    })().then(respond, error => respond({ ok: false, error: error.message }));
-    return true;
   }
   if (message?.type === 'ROOM_EVENT') {
     if (sender.id !== chrome.runtime.id || !sender.tab?.id ||

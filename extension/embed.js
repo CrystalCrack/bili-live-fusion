@@ -5,6 +5,7 @@ import { LivePlayer } from './lib/live-player.js';
 import { NativeCompositor } from './lib/native-compositor.js';
 import { AudioMixer } from './lib/audio.js';
 import { withTimeout } from './lib/async.js';
+import { authorizeEmbed } from './lib/embed-startup.js';
 
 const token = location.hash.slice(1), label = document.querySelector('#state');
 const mixer = new AudioMixer(), session = new LiveSession();
@@ -19,12 +20,16 @@ async function activateAudio() {
 }
 async function start() {
   try {
-    const permission = await withTimeout(chrome.runtime.sendMessage({ type: 'EMBED_AUTHORIZE', token }), 8000, '连接响应超时，请重新应用场景');
-    if (!permission?.ok) throw new Error(permission?.error || '请通过插件小窗开启融合播放');
-    const config = embeddedScene((await chrome.storage.local.get('fusion-scene-v1'))['fusion-scene-v1']);
+    status('正在读取启动授权…');
+    await authorizeEmbed(token, location.href);
+    if (closed) return;
+    status('正在读取已保存的场景…');
+    const saved = await withTimeout(chrome.storage.local.get('fusion-scene-v1'), 4000, '场景读取超时，请重新加载扩展后重试');
+    const config = embeddedScene(saved['fusion-scene-v1']);
     scene = config.scene;
     if (closed) return;
-    const outputs = await withTimeout(outputsReady, 8000, '原生播放器连接超时，请重新应用场景');
+    status('正在连接 B 站原生播放器…');
+    const outputs = await withTimeout(outputsReady, 8000, '原生播放器连接超时，请刷新直播页后重新应用');
     if (closed) return;
     compositor = new NativeCompositor(scene, outputs.video, () => send({ type: 'stream-ready' }), error => status(error.message, true));
     mixer.prepare(); mixer.setMonitorSuppressed(true);

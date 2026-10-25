@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "bili直播融合姬",
-  "version": "0.3.6",
+  "version": "0.3.7",
   "description": "三路 + 一路 = 二路。将两个 Bilibili 直播间的画面、声音和弹幕实时融合，自由布局、选择画质、混音对轴，边看边互动。",
   "minimum_chrome_version": "116",
   "permissions": [

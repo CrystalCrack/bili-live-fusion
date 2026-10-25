@@ -48,7 +48,7 @@
       if (active !== state) return; const data = event.data;
       if (data?.type === 'stream-ready') state.native.postMessage(data);
       else if (data?.type === 'close') restore();
-      else if (data?.type === 'state') { state.text = data.text; state.audioNeeded = data.audioNeeded === true; state.status = data.error ? 'error' : state.attached ? 'playing' : 'connecting'; showProcessor(state, !state.attached || state.audioNeeded || data.error === true); }
+      else if (data?.type === 'state') { state.text = data.text; state.audioNeeded = data.audioNeeded === true; state.status = data.error ? 'error' : state.attached ? 'playing' : 'connecting'; if (data.error) clearTimeout(state.timeout); showProcessor(state, !state.attached || state.audioNeeded || data.error === true); }
     };
     state.native.start(); state.producer.start();
     window.postMessage({ type: 'BILI_FUSION_NATIVE_INIT', token: state.token }, location.origin, [nativeChannel.port2]);

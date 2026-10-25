@@ -1,6 +1,6 @@
 {
   "name": "bili-live-fusion",
-  "version": "0.3.6",
+  "version": "0.3.7",
   "private": true,
   "type": "module",
   "description": "bili直播融合姬 · 三路 + 一路 = 二路 · 双 Bilibili 直播实时融合",
