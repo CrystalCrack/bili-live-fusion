@@ -19,7 +19,7 @@ async function receive(message) {
 }
 function connect() {
   clearInterval(readyTimer); clearTimeout(timeout); connection?.close(); channel?.close(); candidates = []; offered = false;
-  if (!/^[a-f0-9-]{36}$/i.test(token)) { showState('从工作台开启输出', '返回三路融合姬，点击“打开输出窗口”'); return; }
+  if (!/^[a-f0-9-]{36}$/i.test(token)) { showState('从工作台开启输出', '返回bili直播融合姬，点击“打开输出窗口”'); return; }
   connection = new RTCPeerConnection({ iceServers: [] }); channel = new BroadcastChannel(`fusion-output-${token}`);
   channel.onmessage = event => receive(event.data).catch(() => showState('连接已中断', '点击重新连接，继续输出'));
   connection.onicecandidate = event => { if (event.candidate) send({ type: 'candidate-answer', candidate: event.candidate.toJSON() }); };

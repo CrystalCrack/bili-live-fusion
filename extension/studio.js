@@ -639,13 +639,13 @@ function finishRecording() {
   const blob = new Blob(recordChunks, { type: recorder.mimeType }); recordChunks = []; recorder = null;
   if (recordingUrl) URL.revokeObjectURL(recordingUrl);
   recordingUrl = URL.createObjectURL(blob); hasUnsavedRecording = true;
-  const link = $('#record-download'); link.href = recordingUrl; link.download = `三路融合姬-${stamp()}.webm`; link.hidden = false;
+  const link = $('#record-download'); link.href = recordingUrl; link.download = `bili直播融合姬-${stamp()}.webm`; link.hidden = false;
   link.textContent = `保存录制文件 · ${(blob.size / 1024 / 1024).toFixed(1)} MB`;
   toast('录制完成，点击“保存录制文件”下载');
 }
 function exportScene() {
   const data = sanitizeScene(scene);
-  downloadBlob(new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' }), `三路融合姬-${scene.name.replace(/[<>:"/\\|?*]/g, '_')}.json`);
+  downloadBlob(new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' }), `bili直播融合姬-${scene.name.replace(/[<>:"/\\|?*]/g, '_')}.json`);
   toast('场景文件已导出');
 }
 async function importScene(file) {
@@ -733,7 +733,7 @@ function bindEvents() {
   $('#record-download').addEventListener('click', () => { hasUnsavedRecording = false; });
   $('#snapshot-button').addEventListener('click', () => {
     if (!hasSource()) { toast('请先接入画面后再保存', 'warning'); return; }
-    compositor.render(performance.now()); $('#composite').toBlob(blob => { if (blob) { downloadBlob(blob, `三路融合姬-${stamp()}.png`); toast('当前融合画面已保存'); } }, 'image/png');
+    compositor.render(performance.now()); $('#composite').toBlob(blob => { if (blob) { downloadBlob(blob, `bili直播融合姬-${stamp()}.png`); toast('当前融合画面已保存'); } }, 'image/png');
   });
   $('#crop-full').addEventListener('click', () => cropEditor.reset());
   $('#crop-apply').addEventListener('click', () => cropEditor.apply());

@@ -1,19 +1,49 @@
 {
   "manifest_version": 3,
-  "name": "三路融合姬",
-  "version": "0.3.4",
-  "description": "把两个 Bilibili 直播间的画面、声音和弹幕，编排进同一块画布。",
+  "name": "bili直播融合姬",
+  "version": "0.3.5",
+  "description": "三路 + 一路 = 二路。将两个 Bilibili 直播间的画面、声音和弹幕实时融合，自由布局、选择画质、混音对轴，边看边互动。",
   "minimum_chrome_version": "116",
-  "permissions": ["storage", "cookies", "declarativeNetRequestWithHostAccess"],
-  "host_permissions": ["https://*.bilibili.com/*", "https://*.bilivideo.com/*", "https://*.bilivideo.cn/*", "https://*.biliapi.net/*"],
-  "background": { "service_worker": "background.js", "type": "module" },
-  "action": { "default_title": "打开三路融合姬", "default_popup": "launcher.html" },
-  "options_ui": { "page": "studio.html", "open_in_tab": true },
-  "icons": { "16": "assets/icon-16.png", "48": "assets/icon-48.png", "128": "assets/icon-128.png" },
-  "content_scripts": [{
-    "matches": ["https://live.bilibili.com/*"],
-    "js": ["content.js"],
-    "run_at": "document_idle"
-  }],
-  "content_security_policy": { "extension_pages": "script-src 'self'; object-src 'none'; base-uri 'self'" }
+  "permissions": [
+    "storage",
+    "cookies",
+    "declarativeNetRequestWithHostAccess"
+  ],
+  "host_permissions": [
+    "https://*.bilibili.com/*",
+    "https://*.bilivideo.com/*",
+    "https://*.bilivideo.cn/*",
+    "https://*.biliapi.net/*"
+  ],
+  "background": {
+    "service_worker": "background.js",
+    "type": "module"
+  },
+  "action": {
+    "default_title": "打开bili直播融合姬",
+    "default_popup": "launcher.html"
+  },
+  "options_ui": {
+    "page": "studio.html",
+    "open_in_tab": true
+  },
+  "icons": {
+    "16": "assets/icon-16.png",
+    "48": "assets/icon-48.png",
+    "128": "assets/icon-128.png"
+  },
+  "content_scripts": [
+    {
+      "matches": [
+        "https://live.bilibili.com/*"
+      ],
+      "js": [
+        "content.js"
+      ],
+      "run_at": "document_idle"
+    }
+  ],
+  "content_security_policy": {
+    "extension_pages": "script-src 'self'; object-src 'none'; base-uri 'self'"
+  }
 }

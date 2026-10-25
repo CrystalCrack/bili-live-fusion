@@ -16,4 +16,4 @@ const server = http.createServer((req, res) => {
   });
 });
 const port = Number(process.env.PORT || 4173);
-server.listen(port, '127.0.0.1', () => process.stdout.write(`三路融合姬预览：http://127.0.0.1:${port}\n按 Ctrl+C 结束预览。\n`));
+server.listen(port, '127.0.0.1', () => process.stdout.write(`bili直播融合姬预览：http://127.0.0.1:${port}\n按 Ctrl+C 结束预览。\n`));
