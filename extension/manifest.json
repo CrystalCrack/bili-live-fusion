@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "三路融合姬",
-  "version": "0.3.1",
+  "version": "0.3.2",
   "description": "把两个 Bilibili 直播间的画面、声音和弹幕，编排进同一块画布。",
   "minimum_chrome_version": "116",
   "permissions": ["storage", "cookies", "declarativeNetRequestWithHostAccess"],

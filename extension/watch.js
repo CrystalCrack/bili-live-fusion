@@ -23,7 +23,7 @@ export class WatchView {
     $('#watch-send-form').addEventListener('submit', async event => { event.preventDefault(); const input = $('#watch-send-text'), text = input.value; if (await this.sendDanmaku(text, $('#watch-send-target').value)) { if (input.value === text) input.value = ''; this.updateSend(); } });
     document.addEventListener('fullscreenchange', () => { if (!this.active) return; const active = document.fullscreenElement === player; $('#watch-fullscreen').textContent = active ? '退出全屏' : '全屏'; $('#watch-fullscreen').setAttribute('aria-pressed', String(active)); this.fit(); this.showControls(); });
     document.addEventListener('keydown', event => {
-      if (!this.active || event.target.closest('input, select, textarea, button, [contenteditable]') || event.altKey || event.ctrlKey || event.metaKey) return;
+      if (!this.active || event.isComposing || event.target.closest('input, select, textarea, button, [contenteditable]') || event.altKey || event.ctrlKey || event.metaKey) return;
       if (event.code === 'Space') { event.preventDefault(); this.togglePlay(); }
       if (event.key.toLowerCase() === 'f') { event.preventDefault(); this.fullscreen(); }
       if (event.key.toLowerCase() === 'm') { event.preventDefault(); $('#watch-audio').click(); }
@@ -80,6 +80,8 @@ export class WatchView {
   notice(text, error = false) { this.$('#watch-notice').textContent = text; this.$('#watch-notice').classList.toggle('error', error); }
   updateSend() {
     const text = this.$('#watch-send-text').value.trim(), count = [...text].length; this.$('#watch-text-count').textContent = count + '/30'; this.$('#watch-text-count').classList.toggle('over-limit', count > 30);
+    this.$('#watch-send-text').setAttribute('aria-invalid', String(count > 30));
+    this.$('#watch-send').setAttribute('aria-busy', String(this.sending));
     this.$('#watch-send').disabled = !this.active || this.$('#watch-send-target').selectedOptions[0]?.disabled || this.sending || count === 0 || count > 30; this.$('#watch-send').textContent = this.sending ? '发送中' : '发送';
   }
   async copyText(text) { try { await navigator.clipboard.writeText(text); this.notice('已复制弹幕'); } catch { this.$('#watch-send-text').value = text; this.$('#watch-send-text').focus(); this.$('#watch-send-text').select(); this.updateSend(); this.notice('弹幕已放入输入框，可编辑或复制'); } }

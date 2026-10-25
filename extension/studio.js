@@ -129,6 +129,7 @@ function updateSelection() {
 }
 function updateInspector() {
   const id = scene.selected, source = scene.sources[id];
+  $$('[data-edit-source]').forEach(button => { const active = button.dataset.editSource === id; button.classList.toggle('active', active); button.setAttribute('aria-pressed', String(active)); });
   $$('[data-source-card]').forEach(card => card.classList.toggle('selected', card.dataset.sourceCard === id));
   $('#inspector-badge').textContent = id; $('#inspector-badge').className = `source-badge ${id.toLowerCase()}`;
   $('#inspector-title').textContent = `直播间 ${id}`; $('#source-visible').checked = source.visible;
@@ -145,11 +146,14 @@ function updateConnected() {
   let count = 0, demo = false;
   for (const id of CHANNELS) {
     const source = sources[id], stream = source.stream, connected = sourceActive(source);
+    const card = document.querySelector('[data-source-card="' + id + '"]');
+    card.dataset.state = source.liveState || (connected ? 'playing' : 'idle');
+    card.setAttribute('aria-busy', String(source.pending));
     if (connected) count++; if (source.demo) demo = true;
     const status = $(`[data-status="${id}"]`); status.textContent = source.pending ? '连接中' : source.demo ? '演示中' : source.liveState ? ({ playing: '直播中', buffering: '缓冲中', connecting: '连接中', reconnecting: '重连中', blocked: '等待播放', error: '连接失败' }[source.liveState] || '连接中') : connected ? '标签页输入' : '未连接';
     status.classList.toggle('connected', connected && !['blocked', 'error'].includes(source.liveState)); status.classList.toggle('warning', Boolean(source.pending || ['blocked', 'error', 'reconnecting'].includes(source.liveState)));
     $(`[data-thumbnail="${id}"]`).classList.toggle('connected', connected);
-    const connect = $(`[data-connect="${id}"]`); connect.disabled = source.pending; connect.querySelector('span').textContent = source.player?.blocked ? `继续播放 ${id}` : source.player ? `重新连接 ${id}` : `连接直播间 ${id}`;
+    const connect = $(`[data-connect="${id}"]`); connect.disabled = source.pending; connect.querySelector('span').textContent = source.pending ? '正在连接 ' + id + '…' : source.player?.blocked ? `继续播放 ${id}` : source.player ? `重新连接 ${id}` : `连接直播间 ${id}`;
     $(`[data-disconnect="${id}"]`).disabled = !stream && !source.player && !source.pending;
     $(`[data-source-title="${id}"]`).textContent = source.demo ? '演示画面 · 合成音频' : source.liveText ? source.liveText : connected ? `${stream.getAudioTracks().some(track => track.readyState === 'live') ? '音频已接入' : '仅画面'} · 标签页` : '直连画面 · 音频 · 弹幕';
     $(`[data-source-title="${id}"]`).title = source.roomId ? `直播间 ${source.roomId} · ${source.liveText}` : source.liveText;
@@ -162,6 +166,12 @@ function updateConnected() {
   }
   $('#source-count').textContent = `${count} / 2 已接入`; $('#demo-status').hidden = !demo;
   $('#demo-button').classList.toggle('demo-running', demo);
+  $('#demo-button').setAttribute('aria-pressed', String(demo));
+  $('#workflow-source-state').textContent = count ? count + ' / 2 路现场已接入' : '添加 A、B 两路现场';
+  const batch = $('#connect-all'), candidates = CHANNELS.filter(id => !sourceActive(sources[id]) && !sources[id].pending && parseRoomId(scene.sources[id].room));
+  batch.disabled = !candidates.length;
+  batch.textContent = CHANNELS.some(id => sources[id].pending) ? '正在连接…' : count === 2 ? '全部已接入' : '连接全部';
+  updateStudioSend();
   updateSelection();
   if (!demo && demoTimer) { clearInterval(demoTimer); demoTimer = null; }
 }
@@ -432,7 +442,7 @@ async function submitDanmaku(text, target) {
   if (!text || [...text].length > 30) throw new Error('弹幕请输入 1–30 个字');
   if (!['A', 'B', 'both'].includes(target)) throw new Error('请选择发送直播间');
   const ids = target === 'both' ? CHANNELS : [target];
-  sendBusy = true; $('#send-form button').disabled = true;
+  sendBusy = true; updateStudioSend();
   const sentTabIds = new Set(), sentRoomIds = new Set(), errors = [], submitted = [];
   try {
     for (const id of ids) {
@@ -446,17 +456,42 @@ async function submitDanmaku(text, target) {
         submitted.push(id);
       } catch (error) { errors.push(`${id}：${error.message}`); }
     }
-  } finally { sendBusy = false; $('#send-form button').disabled = false; }
+  } finally { sendBusy = false; updateStudioSend(); }
   const success = submitted.length ? `已向 ${submitted.join('、')} 发送弹幕` : '';
   return { ok: errors.length === 0 && submitted.length > 0, sent: submitted, errors, message: [success, ...errors].filter(Boolean).join('；') };
 }
 async function sendDanmaku(event) {
   event.preventDefault();
+  const input = $('#send-text'), text = input.value, target = $('#send-target').value;
   try {
-    const result = await submitDanmaku($('#send-text').value, $('#send-target').value);
-    if (result.ok) $('#send-text').value = '';
+    const result = await submitDanmaku(text, target);
+    if (result.ok && input.value === text) input.value = '';
+    $('#studio-send-notice').textContent = result.message;
+    $('#studio-send-notice').classList.toggle('error', !result.ok);
     toast(result.message, result.ok ? 'success' : 'error');
-  } catch (error) { toast(error.message, 'error'); }
+  } catch (error) { $('#studio-send-notice').textContent = error.message; $('#studio-send-notice').classList.add('error'); toast(error.message, 'error'); }
+  finally { updateStudioSend(); }
+}
+function updateStudioSend() {
+  const input = $('#send-text'), count = [...input.value.trim()].length, target = $('#send-target');
+  for (const option of target.options) {
+    const ids = option.value === 'both' ? CHANNELS : [option.value];
+    option.disabled = !ids.every(id => sources[id].demo || sources[id].roomId || sources[id].tabId);
+  }
+  if (target.selectedOptions[0]?.disabled) target.value = [...target.options].find(option => !option.disabled)?.value || 'A';
+  $('#studio-text-count').textContent = count + '/30';
+  $('#studio-text-count').classList.toggle('over-limit', count > 30);
+  $('#send-form button').disabled = sendBusy || count === 0 || count > 30 || Boolean(target.selectedOptions[0]?.disabled);
+  $('#send-form button').setAttribute('aria-busy', String(sendBusy));
+  $('#send-text').setAttribute('aria-invalid', String(count > 30));
+}
+function jumpToSection(name) {
+  const targets = { sources: '#sources-section', layout: '#layout-section', audio: '#audio-section', danmaku: '#danmaku-section' };
+  const target = $(targets[name]); if (!target) return;
+  target.scrollIntoView({ behavior: matchMedia('(prefers-reduced-motion: reduce)').matches ? 'instant' : 'smooth', block: 'start' });
+  target.classList.add('jump-highlight'); setTimeout(() => target.classList.remove('jump-highlight'), 1300);
+  const focus = name === 'sources' ? $('#room-' + (sourceActive(sources.A) ? 'B' : 'A')) : target.querySelector('button, input, select');
+  focus?.focus({ preventScroll: true });
 }
 function bindTransform() {
   for (const key of ['x', 'y', 'w', 'h']) {
@@ -621,6 +656,15 @@ async function importScene(file) {
   finally { $('#scene-file').value = ''; }
 }
 function bindEvents() {
+  $$('[data-jump]').forEach(button => button.addEventListener('click', () => jumpToSection(button.dataset.jump)));
+  $$('[data-edit-source]').forEach(button => button.addEventListener('click', () => selectSource(button.dataset.editSource)));
+  $('#workflow-watch').addEventListener('click', () => switchView('watch'));
+  $('#connect-all').addEventListener('click', () => {
+    const ids = CHANNELS.filter(id => !sourceActive(sources[id]) && !sources[id].pending && parseRoomId(scene.sources[id].room));
+    for (const id of ids) connectLive(id);
+  });
+  $('#send-text').addEventListener('input', updateStudioSend);
+  $('#send-target').addEventListener('change', updateStudioSend);
   for (const id of CHANNELS) {
     $(`[data-connect="${id}"]`).addEventListener('click', () => connectLive(id));
     $(`[data-tab-capture="${id}"]`).addEventListener('click', () => captureSource(id));
@@ -633,10 +677,13 @@ function bindEvents() {
     $(`[data-disconnect="${id}"]`).addEventListener('click', () => disconnectSource(id));
     $(`[data-select="${id}"]`).addEventListener('click', () => selectSource(id));
     $(`[data-thumbnail="${id}"]`).addEventListener('click', () => selectSource(id));
+    const thumbnail = document.querySelector('[data-thumbnail="' + id + '"]');
+    thumbnail.tabIndex = 0; thumbnail.setAttribute('role', 'button'); thumbnail.setAttribute('aria-label', '选择直播间 ' + id + ' 的画面');
+    thumbnail.addEventListener('keydown', event => { if (event.code === 'Space' || event.key === 'Enter') { event.preventDefault(); selectSource(id); } });
     $(`[data-thumbnail="${id}"]`).addEventListener('dblclick', () => openCropEditor(id));
     $(`[data-open="${id}"]`).addEventListener('click', () => openRoom(id));
-    $(`#room-${id}`).addEventListener('input', event => { scene.sources[id].room = event.target.value.slice(0, 160); saveScene(); });
-    $(`#room-${id}`).addEventListener('keydown', event => { if (event.key === 'Enter') connectLive(id); });
+    $(`#room-${id}`).addEventListener('input', event => { scene.sources[id].room = event.target.value.slice(0, 160); updateConnected(); saveScene(); });
+    $(`#room-${id}`).addEventListener('keydown', event => { if (event.key === 'Enter' && !event.isComposing) { event.preventDefault(); connectLive(id); } });
     $(`#tab-${id}`).addEventListener('change', async event => {
       sources[id].tabId = event.target.value ? Number(event.target.value) : null; sources[id].state = null;
       const room = rooms.find(tab => tab.id === sources[id].tabId);
